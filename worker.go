@@ -40,6 +40,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/thejerf/suture/v4"
@@ -71,6 +72,8 @@ type workerContext struct {
 	attempt  int
 	sup      *suture.Supervisor
 	children sync.Map // name (string) → suture.ServiceToken
+	metrics  Metrics
+	active   *atomic.Int32
 }
 
 func (wc *workerContext) Name() string { return wc.name }
@@ -80,12 +83,16 @@ func (wc *workerContext) Add(w *Worker) {
 	if wc.sup == nil {
 		return
 	}
+	// Inherit parent metrics if the child doesn't override.
+	if w.metrics == nil {
+		w.metrics = wc.metrics
+	}
 	// Remove existing worker with the same name (replace semantics).
 	if tok, loaded := wc.children.LoadAndDelete(w.name); loaded {
 		_ = wc.sup.Remove(tok.(suture.ServiceToken))
 	}
 	// Each child gets its own supervisor subtree, scoped to this parent.
-	tok := addWorkerToSupervisor(wc.sup, w)
+	tok := addWorkerToSupervisor(wc.sup, w, wc.metrics, wc.active)
 	wc.children.Store(w.name, tok)
 }
 
@@ -108,8 +115,11 @@ func (wc *workerContext) Children() []string {
 	return names
 }
 
-func newWorkerContext(ctx context.Context, name string, attempt int, sup *suture.Supervisor) WorkerContext {
-	return &workerContext{Context: ctx, name: name, attempt: attempt, sup: sup}
+func newWorkerContext(ctx context.Context, name string, attempt int, sup *suture.Supervisor, metrics Metrics, active *atomic.Int32) WorkerContext {
+	if metrics == nil {
+		metrics = NoopMetrics
+	}
+	return &workerContext{Context: ctx, name: name, attempt: attempt, sup: sup, metrics: metrics, active: active}
 }
 
 // Worker represents a background goroutine managed by the framework.
@@ -123,6 +133,7 @@ type Worker struct {
 	failureBackoff   time.Duration
 	backoffJitter    *suture.Jitter
 	timeout          time.Duration
+	metrics          Metrics // nil means inherit from parent
 }
 
 // NewWorker creates a Worker with the given name and run function.
@@ -170,6 +181,13 @@ func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker {
 // graceful shutdown. Suture default is 10 seconds.
 func (w *Worker) WithTimeout(d time.Duration) *Worker {
 	w.timeout = d
+	return w
+}
+
+// WithMetrics sets a per-worker metrics implementation, overriding the
+// metrics inherited from the parent WorkerContext or Run options.
+func (w *Worker) WithMetrics(m Metrics) *Worker {
+	w.metrics = m
 	return w
 }
 

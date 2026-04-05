@@ -20,7 +20,7 @@ func TestEveryInterval(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Millisecond)
 	defer cancel()
 
-	wctx := newWorkerContext(ctx, "ticker", 0, nil)
+	wctx := newWorkerContext(ctx, "ticker", 0, nil, nil, nil)
 	err := fn(wctx)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.GreaterOrEqual(t, int(count.Load()), 3)
@@ -38,7 +38,7 @@ func TestEveryInterval_ErrorStops(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	wctx := newWorkerContext(ctx, "ticker", 0, nil)
+	wctx := newWorkerContext(ctx, "ticker", 0, nil, nil, nil)
 	err := fn(wctx)
 	assert.EqualError(t, err, "done")
 	assert.Equal(t, int32(2), count.Load())
@@ -57,7 +57,7 @@ func TestChannelWorker(t *testing.T) {
 		return nil
 	})
 
-	wctx := newWorkerContext(context.Background(), "ch", 0, nil)
+	wctx := newWorkerContext(context.Background(), "ch", 0, nil, nil, nil)
 	err := fn(wctx)
 	assert.NoError(t, err)
 	assert.Equal(t, []string{"a", "b", "c"}, items)
@@ -73,7 +73,7 @@ func TestChannelWorker_ContextCancel(t *testing.T) {
 		return nil
 	})
 
-	wctx := newWorkerContext(ctx, "ch", 0, nil)
+	wctx := newWorkerContext(ctx, "ch", 0, nil, nil, nil)
 	err := fn(wctx)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
@@ -93,7 +93,7 @@ func TestBatchChannelWorker_MaxSize(t *testing.T) {
 		return nil
 	})
 
-	wctx := newWorkerContext(context.Background(), "batch", 0, nil)
+	wctx := newWorkerContext(context.Background(), "batch", 0, nil, nil, nil)
 	err := fn(wctx)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, len(batches))
@@ -117,7 +117,7 @@ func TestBatchChannelWorker_MaxDelay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	wctx := newWorkerContext(ctx, "batch", 0, nil)
+	wctx := newWorkerContext(ctx, "batch", 0, nil, nil, nil)
 	_ = fn(wctx)
 	assert.GreaterOrEqual(t, len(batches), 1, "should flush on timer")
 	assert.Equal(t, []int{1, 2}, batches[0])
@@ -137,7 +137,7 @@ func TestBatchChannelWorker_FlushOnClose(t *testing.T) {
 		return nil
 	})
 
-	wctx := newWorkerContext(context.Background(), "batch", 0, nil)
+	wctx := newWorkerContext(context.Background(), "batch", 0, nil, nil, nil)
 	err := fn(wctx)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(batches))

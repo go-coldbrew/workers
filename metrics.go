@@ -1,0 +1,121 @@
+package workers
+
+import (
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+// Metrics collects worker lifecycle metrics.
+// Implement this interface to provide custom metrics (e.g., Datadog, StatsD).
+// Use NoopMetrics to disable metrics, or NewPrometheusMetrics for the built-in
+// Prometheus implementation.
+type Metrics interface {
+	WorkerStarted(name string)
+	WorkerStopped(name string)
+	WorkerPanicked(name string)
+	WorkerFailed(name string, err error)
+	WorkerRestarted(name string, attempt int)
+	ObserveRunDuration(name string, duration time.Duration)
+	SetActiveWorkers(count int)
+}
+
+// NoopMetrics is a no-op implementation of Metrics. Used as the default
+// when no metrics are configured via WithMetrics.
+var NoopMetrics Metrics = &noopMetrics{}
+
+type noopMetrics struct{}
+
+func (n *noopMetrics) WorkerStarted(string)                  {}
+func (n *noopMetrics) WorkerStopped(string)                  {}
+func (n *noopMetrics) WorkerPanicked(string)                 {}
+func (n *noopMetrics) WorkerFailed(string, error)            {}
+func (n *noopMetrics) WorkerRestarted(string, int)           {}
+func (n *noopMetrics) ObserveRunDuration(string, time.Duration) {}
+func (n *noopMetrics) SetActiveWorkers(int)                  {}
+
+// prometheusMetrics implements Metrics using Prometheus counters, histograms,
+// and gauges registered via promauto.
+type prometheusMetrics struct {
+	started     *prometheus.CounterVec
+	stopped     *prometheus.CounterVec
+	panicked    *prometheus.CounterVec
+	failed      *prometheus.CounterVec
+	restarted   *prometheus.CounterVec
+	runDuration *prometheus.HistogramVec
+	activeCount prometheus.Gauge
+}
+
+// NewPrometheusMetrics creates a Metrics implementation backed by Prometheus.
+// The namespace is prepended to all metric names (e.g., "myapp" →
+// "myapp_worker_started_total"). Metrics are auto-registered with the
+// default Prometheus registry.
+func NewPrometheusMetrics(namespace string) Metrics {
+	return &prometheusMetrics{
+		started: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "worker_started_total",
+			Help:      "Total number of worker starts.",
+		}, []string{"worker"}),
+		stopped: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "worker_stopped_total",
+			Help:      "Total number of worker stops.",
+		}, []string{"worker"}),
+		panicked: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "worker_panicked_total",
+			Help:      "Total number of worker panics.",
+		}, []string{"worker"}),
+		failed: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "worker_failed_total",
+			Help:      "Total number of worker failures.",
+		}, []string{"worker"}),
+		restarted: promauto.NewCounterVec(prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "worker_restarted_total",
+			Help:      "Total number of worker restarts.",
+		}, []string{"worker"}),
+		runDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "worker_run_duration_seconds",
+			Help:      "Duration of worker run cycles in seconds.",
+			Buckets:   prometheus.DefBuckets,
+		}, []string{"worker"}),
+		activeCount: promauto.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Name:      "worker_active_count",
+			Help:      "Number of currently active workers.",
+		}),
+	}
+}
+
+func (p *prometheusMetrics) WorkerStarted(name string) {
+	p.started.WithLabelValues(name).Inc()
+}
+
+func (p *prometheusMetrics) WorkerStopped(name string) {
+	p.stopped.WithLabelValues(name).Inc()
+}
+
+func (p *prometheusMetrics) WorkerPanicked(name string) {
+	p.panicked.WithLabelValues(name).Inc()
+}
+
+func (p *prometheusMetrics) WorkerFailed(name string, _ error) {
+	p.failed.WithLabelValues(name).Inc()
+}
+
+func (p *prometheusMetrics) WorkerRestarted(name string, _ int) {
+	p.restarted.WithLabelValues(name).Inc()
+}
+
+func (p *prometheusMetrics) ObserveRunDuration(name string, duration time.Duration) {
+	p.runDuration.WithLabelValues(name).Observe(duration.Seconds())
+}
+
+func (p *prometheusMetrics) SetActiveWorkers(count int) {
+	p.activeCount.Set(float64(count))
+}

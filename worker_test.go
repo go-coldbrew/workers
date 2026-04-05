@@ -22,7 +22,7 @@ func TestNewWorker(t *testing.T) {
 	assert.False(t, w.restartOnFail)
 
 	// Run it directly to verify
-	wctx := newWorkerContext(context.Background(), "test", 0, nil)
+	wctx := newWorkerContext(context.Background(), "test", 0, nil, nil, nil)
 	err := w.run(wctx)
 	assert.NoError(t, err)
 	assert.True(t, called)
@@ -46,14 +46,14 @@ func TestWorker_Every(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Millisecond)
 	defer cancel()
 
-	wctx := newWorkerContext(ctx, "ticker", 0, nil)
+	wctx := newWorkerContext(ctx, "ticker", 0, nil, nil, nil)
 	_ = w.run(wctx)
 	assert.GreaterOrEqual(t, count, 3, "should tick at least 3 times in 55ms with 10ms interval")
 }
 
 func TestWorkerContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), "key", "value")
-	wctx := newWorkerContext(ctx, "myworker", 3, nil)
+	wctx := newWorkerContext(ctx, "myworker", 3, nil, nil, nil)
 
 	assert.Equal(t, "myworker", wctx.Name())
 	assert.Equal(t, 3, wctx.Attempt())

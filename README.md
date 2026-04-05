@@ -190,8 +190,12 @@ shutdown complete
 - [func BatchChannelWorker\[T any\]\(ch \<\-chan T, maxSize int, maxDelay time.Duration, fn func\(WorkerContext, \[\]T\) error\) func\(WorkerContext\) error](<#BatchChannelWorker>)
 - [func ChannelWorker\[T any\]\(ch \<\-chan T, fn func\(WorkerContext, T\) error\) func\(WorkerContext\) error](<#ChannelWorker>)
 - [func EveryInterval\(d time.Duration, fn func\(WorkerContext\) error\) func\(WorkerContext\) error](<#EveryInterval>)
-- [func Run\(ctx context.Context, workers \[\]\*Worker\) error](<#Run>)
-- [func RunWorker\(ctx context.Context, w \*Worker\)](<#RunWorker>)
+- [func Run\(ctx context.Context, workers \[\]\*Worker, opts ...RunOption\) error](<#Run>)
+- [func RunWorker\(ctx context.Context, w \*Worker, opts ...RunOption\)](<#RunWorker>)
+- [type Metrics](<#Metrics>)
+  - [func NewPrometheusMetrics\(namespace string\) Metrics](<#NewPrometheusMetrics>)
+- [type RunOption](<#RunOption>)
+  - [func WithMetrics\(m Metrics\) RunOption](<#WithMetrics>)
 - [type Worker](<#Worker>)
   - [func NewWorker\(name string, run func\(WorkerContext\) error\) \*Worker](<#NewWorker>)
   - [func \(w \*Worker\) Every\(d time.Duration\) \*Worker](<#Worker.Every>)
@@ -199,6 +203,7 @@ shutdown complete
   - [func \(w \*Worker\) WithFailureBackoff\(d time.Duration\) \*Worker](<#Worker.WithFailureBackoff>)
   - [func \(w \*Worker\) WithFailureDecay\(decay float64\) \*Worker](<#Worker.WithFailureDecay>)
   - [func \(w \*Worker\) WithFailureThreshold\(threshold float64\) \*Worker](<#Worker.WithFailureThreshold>)
+  - [func \(w \*Worker\) WithMetrics\(m Metrics\) \*Worker](<#Worker.WithMetrics>)
   - [func \(w \*Worker\) WithRestart\(restart bool\) \*Worker](<#Worker.WithRestart>)
   - [func \(w \*Worker\) WithTimeout\(d time.Duration\) \*Worker](<#Worker.WithTimeout>)
 - [type WorkerContext](<#WorkerContext>)
@@ -371,7 +376,7 @@ tick 2
 ## func Run
 
 ```go
-func Run(ctx context.Context, workers []*Worker) error
+func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
 ```
 
 Run starts all workers under a suture supervisor and blocks until ctx is cancelled and all workers have exited. Each worker gets its own child supervisor — when a worker stops, its children stop too. A worker exiting early \(without restart\) does not stop other workers. Returns nil on clean shutdown.
@@ -427,7 +432,7 @@ all workers stopped
 ## func RunWorker
 
 ```go
-func RunWorker(ctx context.Context, w *Worker)
+func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
 ```
 
 RunWorker runs a single worker with panic recovery and optional restart. Blocks until ctx is cancelled or the worker exits without RestartOnFail.
@@ -472,6 +477,56 @@ done
 
 </p>
 </details>
+
+<a name="Metrics"></a>
+## type Metrics
+
+Metrics collects worker lifecycle metrics. Implement this interface to provide custom metrics \(e.g., Datadog, StatsD\). Use NoopMetrics to disable metrics, or NewPrometheusMetrics for the built\-in Prometheus implementation.
+
+```go
+type Metrics interface {
+    WorkerStarted(name string)
+    WorkerStopped(name string)
+    WorkerPanicked(name string)
+    WorkerFailed(name string, err error)
+    WorkerRestarted(name string, attempt int)
+    ObserveRunDuration(name string, duration time.Duration)
+    SetActiveWorkers(count int)
+}
+```
+
+<a name="NoopMetrics"></a>NoopMetrics is a no\-op implementation of Metrics. Used as the default when no metrics are configured via WithMetrics.
+
+```go
+var NoopMetrics Metrics = &noopMetrics{}
+```
+
+<a name="NewPrometheusMetrics"></a>
+### func NewPrometheusMetrics
+
+```go
+func NewPrometheusMetrics(namespace string) Metrics
+```
+
+NewPrometheusMetrics creates a Metrics implementation backed by Prometheus. The namespace is prepended to all metric names \(e.g., "myapp" → "myapp\_worker\_started\_total"\). Metrics are auto\-registered with the default Prometheus registry.
+
+<a name="RunOption"></a>
+## type RunOption
+
+RunOption configures the behavior of Run.
+
+```go
+type RunOption func(*runConfig)
+```
+
+<a name="WithMetrics"></a>
+### func WithMetrics
+
+```go
+func WithMetrics(m Metrics) RunOption
+```
+
+WithMetrics sets the metrics implementation for all workers started by Run. Workers inherit this unless they override via Worker.WithMetrics. If not set, NoopMetrics is used.
 
 <a name="Worker"></a>
 ## type Worker
@@ -617,6 +672,15 @@ func (w *Worker) WithFailureThreshold(threshold float64) *Worker
 ```
 
 WithFailureThreshold sets the number of failures allowed before the supervisor gives up restarting. Suture default is 5.
+
+<a name="Worker.WithMetrics"></a>
+### func \(\*Worker\) WithMetrics
+
+```go
+func (w *Worker) WithMetrics(m Metrics) *Worker
+```
+
+WithMetrics sets a per\-worker metrics implementation, overriding the metrics inherited from the parent WorkerContext or Run options.
 
 <a name="Worker.WithRestart"></a>
 ### func \(\*Worker\) WithRestart
