@@ -20,7 +20,7 @@ type runConfig struct {
 
 // WithMetrics sets the metrics implementation for all workers started by Run.
 // Workers inherit this unless they override via Worker.WithMetrics.
-// If not set, NoopMetrics is used.
+// If not set, &BaseMetrics{} is used.
 func WithMetrics(m Metrics) RunOption {
 	return func(c *runConfig) {
 		c.metrics = m
@@ -97,7 +97,7 @@ func resolveMetrics(w *Worker, parent Metrics) Metrics {
 	if parent != nil {
 		return parent
 	}
-	return NoopMetrics
+	return &BaseMetrics{}
 }
 
 // addWorkerToSupervisor creates a child supervisor for the worker,
@@ -116,7 +116,7 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, metrics Metrics
 // A worker exiting early (without restart) does not stop other workers.
 // Returns nil on clean shutdown.
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
-	cfg := &runConfig{metrics: NoopMetrics}
+	cfg := &runConfig{metrics: &BaseMetrics{}}
 	for _, opt := range opts {
 		opt(cfg)
 	}
