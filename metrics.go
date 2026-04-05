@@ -1,10 +1,16 @@
 package workers
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	promMetricsMu    sync.RWMutex
+	promMetricsCache = map[string]*prometheusMetrics{}
 )
 
 // Metrics collects worker lifecycle metrics.
@@ -50,9 +56,24 @@ type prometheusMetrics struct {
 // NewPrometheusMetrics creates a Metrics implementation backed by Prometheus.
 // The namespace is prepended to all metric names (e.g., "myapp" →
 // "myapp_worker_started_total"). Metrics are auto-registered with the
-// default Prometheus registry.
+// default Prometheus registry. Safe to call multiple times with the same
+// namespace — returns the cached instance. The cache is process-global;
+// use a small number of static namespaces (not per-request/tenant values).
 func NewPrometheusMetrics(namespace string) Metrics {
-	return &prometheusMetrics{
+	promMetricsMu.RLock()
+	if m, ok := promMetricsCache[namespace]; ok {
+		promMetricsMu.RUnlock()
+		return m
+	}
+	promMetricsMu.RUnlock()
+
+	promMetricsMu.Lock()
+	defer promMetricsMu.Unlock()
+	// Double-check after acquiring write lock.
+	if m, ok := promMetricsCache[namespace]; ok {
+		return m
+	}
+	m := &prometheusMetrics{
 		started: promauto.NewCounterVec(prometheus.CounterOpts{
 			Namespace: namespace,
 			Name:      "worker_started_total",
@@ -90,6 +111,8 @@ func NewPrometheusMetrics(namespace string) Metrics {
 			Help:      "Number of currently active workers.",
 		}),
 	}
+	promMetricsCache[namespace] = m
+	return m
 }
 
 func (p *prometheusMetrics) WorkerStarted(name string) {

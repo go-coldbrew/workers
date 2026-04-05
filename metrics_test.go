@@ -187,3 +187,31 @@ func TestMetrics_NoopDefault(t *testing.T) {
 
 	Run(ctx, []*Worker{w}) // no WithMetrics — uses NoopMetrics
 }
+
+func TestNewPrometheusMetrics_CachesSameNamespace(t *testing.T) {
+	m1 := NewPrometheusMetrics("test_cache")
+	m2 := NewPrometheusMetrics("test_cache")
+	assert.Same(t, m1, m2, "same namespace should return same instance")
+}
+
+func TestNewPrometheusMetrics_DifferentNamespace(t *testing.T) {
+	m1 := NewPrometheusMetrics("ns_a")
+	m2 := NewPrometheusMetrics("ns_b")
+	assert.NotSame(t, m1, m2, "different namespaces should return different instances")
+}
+
+func TestNewPrometheusMetrics_ConcurrentSafe(t *testing.T) {
+	var wg sync.WaitGroup
+	results := make([]Metrics, 100)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = NewPrometheusMetrics("concurrent_test")
+		}(i)
+	}
+	wg.Wait()
+	for _, m := range results {
+		assert.Same(t, results[0], m, "all concurrent calls should return same instance")
+	}
+}
