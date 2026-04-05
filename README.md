@@ -508,7 +508,7 @@ var NoopMetrics Metrics = &noopMetrics{}
 func NewPrometheusMetrics(namespace string) Metrics
 ```
 
-NewPrometheusMetrics creates a Metrics implementation backed by Prometheus. The namespace is prepended to all metric names \(e.g., "myapp" → "myapp\_worker\_started\_total"\). Metrics are auto\-registered with the default Prometheus registry.
+NewPrometheusMetrics creates a Metrics implementation backed by Prometheus. The namespace is prepended to all metric names \(e.g., "myapp" → "myapp\_worker\_started\_total"\). Metrics are auto\-registered with the default Prometheus registry. Safe to call multiple times with the same namespace — returns the cached instance.
 
 <a name="RunOption"></a>
 ## type RunOption
