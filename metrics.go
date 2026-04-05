@@ -15,7 +15,7 @@ var (
 
 // Metrics collects worker lifecycle metrics.
 // Implement this interface to provide custom metrics (e.g., Datadog, StatsD).
-// Use NoopMetrics to disable metrics, or NewPrometheusMetrics for the built-in
+// Use BaseMetrics{} to disable metrics, or NewPrometheusMetrics for the built-in
 // Prometheus implementation.
 type Metrics interface {
 	WorkerStarted(name string)
@@ -27,19 +27,28 @@ type Metrics interface {
 	SetActiveWorkers(count int)
 }
 
-// NoopMetrics is a no-op implementation of Metrics. Used as the default
-// when no metrics are configured via WithMetrics.
-var NoopMetrics Metrics = &noopMetrics{}
+// BaseMetrics provides no-op implementations of all Metrics methods.
+// Embed it in custom Metrics implementations so that new methods added
+// to the Metrics interface in future versions get safe no-op defaults
+// instead of breaking your build:
+//
+//	type myMetrics struct {
+//	    workers.BaseMetrics // forward-compatible
+//	    client *statsd.Client
+//	}
+//
+//	func (m *myMetrics) WorkerStarted(name string) {
+//	    m.client.Incr("worker.started", []string{"worker:" + name}, 1)
+//	}
+type BaseMetrics struct{}
 
-type noopMetrics struct{}
-
-func (n *noopMetrics) WorkerStarted(string)                  {}
-func (n *noopMetrics) WorkerStopped(string)                  {}
-func (n *noopMetrics) WorkerPanicked(string)                 {}
-func (n *noopMetrics) WorkerFailed(string, error)            {}
-func (n *noopMetrics) WorkerRestarted(string, int)           {}
-func (n *noopMetrics) ObserveRunDuration(string, time.Duration) {}
-func (n *noopMetrics) SetActiveWorkers(int)                  {}
+func (BaseMetrics) WorkerStarted(string)                     {}
+func (BaseMetrics) WorkerStopped(string)                     {}
+func (BaseMetrics) WorkerPanicked(string)                    {}
+func (BaseMetrics) WorkerFailed(string, error)               {}
+func (BaseMetrics) WorkerRestarted(string, int)              {}
+func (BaseMetrics) ObserveRunDuration(string, time.Duration) {}
+func (BaseMetrics) SetActiveWorkers(int)                     {}
 
 // prometheusMetrics implements Metrics using Prometheus counters, histograms,
 // and gauges registered via promauto.
