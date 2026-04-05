@@ -28,6 +28,11 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	span, ctx := tracing.NewInternalSpan(ctx, "worker:"+ws.w.name)
 	defer span.Finish()
 
+	// Inject worker name and attempt into log context so all log calls
+	// inside the worker automatically include them.
+	ctx = log.AddToContext(ctx, "worker", ws.w.name)
+	ctx = log.AddToContext(ctx, "attempt", attempt)
+
 	wctx := newWorkerContext(ctx, ws.w.name, attempt, ws.childSup)
 	err := ws.w.run(wctx)
 
