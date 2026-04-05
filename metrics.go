@@ -57,7 +57,8 @@ type prometheusMetrics struct {
 // The namespace is prepended to all metric names (e.g., "myapp" →
 // "myapp_worker_started_total"). Metrics are auto-registered with the
 // default Prometheus registry. Safe to call multiple times with the same
-// namespace — returns the cached instance.
+// namespace — returns the cached instance. The cache is process-global;
+// use a small number of static namespaces (not per-request/tenant values).
 func NewPrometheusMetrics(namespace string) Metrics {
 	promMetricsMu.RLock()
 	if m, ok := promMetricsCache[namespace]; ok {
