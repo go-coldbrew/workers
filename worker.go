@@ -6,7 +6,7 @@
 //
 // Every worker runs inside its own supervisor subtree. This means:
 //   - Each worker gets panic recovery and restart independently
-//   - Workers can dynamically spawn child workers via [WorkerContext.Add]
+//   - Workers can dynamically spawn child workers via [WorkerContext]
 //   - When a parent worker stops, all its children stop (scoped lifecycle)
 //   - The supervisor tree prevents cascading failures and CPU-burn restart storms
 //
@@ -29,7 +29,7 @@
 // # Dynamic Workers
 //
 // Manager workers can spawn and remove child workers at runtime using
-// [WorkerContext.Add], [WorkerContext.Remove], and [WorkerContext.Children].
+// the Add, Remove, and Children methods on [WorkerContext].
 // Children join the parent's supervisor subtree and get full framework
 // guarantees (tracing, panic recovery, restart). See [Example_dynamicWorkerPool].
 //

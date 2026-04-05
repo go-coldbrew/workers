@@ -1,0 +1,17 @@
+output: "{{.Dir}}/README.md"
+header: |+
+  # Workers
+
+  [![Go](https://github.com/go-coldbrew/workers/actions/workflows/go.yml/badge.svg)](https://github.com/go-coldbrew/workers/actions/workflows/go.yml)
+  [![Go Report Card](https://goreportcard.com/badge/github.com/go-coldbrew/workers)](https://goreportcard.com/report/github.com/go-coldbrew/workers)
+  [![GoDoc](https://pkg.go.dev/badge/github.com/go-coldbrew/workers.svg)](https://pkg.go.dev/github.com/go-coldbrew/workers)
+  [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+  **A worker lifecycle library for Go — manage background goroutines with panic recovery, configurable restart, tracing, and structured shutdown.**
+
+  Built on [suture](https://github.com/thejerf/suture) for Erlang-style supervisor trees. Part of the [ColdBrew](https://docs.coldbrew.cloud) framework.
+
+  ---
+
+  ## API Reference
+
