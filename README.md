@@ -381,7 +381,7 @@ tick 2
 </details>
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L118>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L120>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -437,7 +437,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L141>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L143>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
@@ -572,7 +572,7 @@ func (BaseMetrics) WorkerStopped(string)
 <a name="Metrics"></a>
 ## type [Metrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L20-L28>)
 
-Metrics collects worker lifecycle metrics. Implement this interface to provide custom metrics \(e.g., Datadog, StatsD\). Use BaseMetrics to disable metrics, or NewPrometheusMetrics for the built\-in Prometheus implementation.
+Metrics collects worker lifecycle metrics. Implement this interface to provide custom metrics \(e.g., Datadog, StatsD\). Use BaseMetrics\{\} to disable metrics, or NewPrometheusMetrics for the built\-in Prometheus implementation.
 
 ```go
 type Metrics interface {
@@ -611,7 +611,7 @@ type RunOption func(*runConfig)
 func WithMetrics(m Metrics) RunOption
 ```
 
-WithMetrics sets the metrics implementation for all workers started by Run. Workers inherit this unless they override via Worker.WithMetrics. If not set, &BaseMetrics\{\} is used.
+WithMetrics sets the metrics implementation for all workers started by Run. Workers inherit this unless they override via Worker.WithMetrics. If not set, BaseMetrics\{\} is used.
 
 <a name="Worker"></a>
 ## type [Worker](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L127-L137>)

@@ -15,7 +15,7 @@ var (
 
 // Metrics collects worker lifecycle metrics.
 // Implement this interface to provide custom metrics (e.g., Datadog, StatsD).
-// Use BaseMetrics to disable metrics, or NewPrometheusMetrics for the built-in
+// Use BaseMetrics{} to disable metrics, or NewPrometheusMetrics for the built-in
 // Prometheus implementation.
 type Metrics interface {
 	WorkerStarted(name string)

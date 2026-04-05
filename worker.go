@@ -117,7 +117,7 @@ func (wc *workerContext) Children() []string {
 
 func newWorkerContext(ctx context.Context, name string, attempt int, sup *suture.Supervisor, metrics Metrics, active *atomic.Int32) WorkerContext {
 	if metrics == nil {
-		metrics = &BaseMetrics{}
+		metrics = BaseMetrics{}
 	}
 	return &workerContext{Context: ctx, name: name, attempt: attempt, sup: sup, metrics: metrics, active: active}
 }
