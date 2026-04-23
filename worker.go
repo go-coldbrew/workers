@@ -1,12 +1,12 @@
 // Package workers provides a worker lifecycle library for Go, built on
 // [thejerf/suture]. It manages background goroutines with automatic panic
-// recovery, configurable restart with backoff, tracing, and structured shutdown.
+// recovery, configurable restart with backoff, and structured shutdown.
 //
 // # Architecture
 //
 // Every worker runs inside its own supervisor subtree. This means:
 //   - Each worker gets panic recovery and restart independently
-//   - Workers can dynamically spawn child workers via [WorkerContext]
+//   - Workers can dynamically spawn child workers via [WorkerInfo]
 //   - When a parent worker stops, all its children stop (scoped lifecycle)
 //   - The supervisor tree prevents cascading failures and CPU-burn restart storms
 //
@@ -15,30 +15,48 @@
 // Create workers with [NewWorker] and run them with [Run]:
 //
 //	workers.Run(ctx, []*workers.Worker{
-//	    workers.NewWorker("kafka", consume),
-//	    workers.NewWorker("cleanup", cleanup).Every(5 * time.Minute).WithRestart(true),
+//	    workers.NewWorker("kafka").HandlerFunc(consume),
+//	    workers.NewWorker("cleanup").HandlerFunc(cleanup).Every(5 * time.Minute).WithRestart(true),
 //	})
+//
+// # Middleware
+//
+// Cross-cutting concerns like tracing, logging, and panic recovery are
+// implemented as [Middleware]. The middleware chain follows the gRPC
+// interceptor convention: a flat function that calls next to continue:
+//
+//	func myMiddleware(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
+//	    // before
+//	    err := next(ctx, info)
+//	    // after
+//	    return err
+//	}
+//
+// Attach middleware per-worker via [Worker.Interceptors] or per-run via
+// [WithInterceptors]. Built-in middleware is available in the middleware/
+// sub-package.
 //
 // # Helpers
 //
 // Common patterns are provided as helpers:
 //   - [EveryInterval] — periodic execution on a fixed interval
+//   - [EveryIntervalWithJitter] — periodic execution with jitter to prevent thundering herd
 //   - [ChannelWorker] — consume items from a channel one at a time
 //   - [BatchChannelWorker] — collect items into batches, flush on size or timer
 //
 // # Dynamic Workers
 //
 // Manager workers can spawn and remove child workers at runtime using
-// the Add, Remove, and Children methods on [WorkerContext].
+// the Add, Remove, and Children methods on [WorkerInfo].
 // Children join the parent's supervisor subtree and get full framework
-// guarantees (tracing, panic recovery, restart). See [Example_dynamicWorkerPool].
+// guarantees (panic recovery, restart). See [Example_dynamicWorkerPool].
 //
 // [thejerf/suture]: https://github.com/thejerf/suture
 package workers
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,87 +64,109 @@ import (
 	"github.com/thejerf/suture/v4"
 )
 
-// WorkerContext extends context.Context with worker metadata and
-// dynamic child worker management. The framework creates these —
-// users never need to implement this interface.
-type WorkerContext interface {
-	context.Context
-	// Name returns the worker's name.
-	Name() string
-	// Attempt returns the restart attempt number (0 on first run).
-	Attempt() int
-	// Add adds or replaces a child worker by name under the same supervisor.
-	// If a worker with the same name already exists, it is removed first.
-	// Children get full framework guarantees (tracing, panic recovery, restart).
-	Add(w *Worker)
-	// Remove stops a child worker by name.
-	Remove(name string)
-	// Children returns the names of currently running child workers.
-	Children() []string
-}
+// WorkerInfo carries worker metadata and child management. The framework
+// always creates it — it is never nil. context.Context handles
+// cancellation/deadlines/values; WorkerInfo handles everything worker-specific.
+type WorkerInfo struct {
+	name    string
+	attempt int
 
-// workerContext is the framework-owned implementation of WorkerContext.
-type workerContext struct {
-	context.Context
-	name     string
-	attempt  int
+	// child management, set by framework
 	sup      *suture.Supervisor
-	children sync.Map // name (string) → suture.ServiceToken
-	metrics  Metrics
+	children *sync.Map // name (string) → suture.ServiceToken
+	cfg      *runConfig
 	active   *atomic.Int32
+	metrics  Metrics
 }
 
-func (wc *workerContext) Name() string { return wc.name }
-func (wc *workerContext) Attempt() int { return wc.attempt }
+// Name returns the worker's name as passed to [NewWorker].
+func (info *WorkerInfo) Name() string { return info.name }
 
-func (wc *workerContext) Add(w *Worker) {
-	if wc.sup == nil {
+// Attempt returns the restart attempt number (0 on first run).
+func (info *WorkerInfo) Attempt() int { return info.attempt }
+
+// NewWorkerInfo creates a [WorkerInfo] with the given name and attempt.
+// This is useful for testing middleware — the framework creates fully
+// populated instances internally.
+func NewWorkerInfo(name string, attempt int) *WorkerInfo {
+	return &WorkerInfo{name: name, attempt: attempt}
+}
+
+// Add adds or replaces a child worker under this worker's supervisor subtree.
+// If a worker with the same name already exists, it is removed first.
+// Children inherit run-level interceptors, metrics (unless overridden via
+// [Worker.WithMetrics]), and scoped lifecycle — when this worker stops,
+// all its children stop too.
+func (info *WorkerInfo) Add(w *Worker) {
+	if info.sup == nil {
 		return
 	}
 	// Inherit parent metrics if the child doesn't override.
 	if w.metrics == nil {
-		w.metrics = wc.metrics
+		w.metrics = info.metrics
 	}
 	// Remove existing worker with the same name (replace semantics).
-	if tok, loaded := wc.children.LoadAndDelete(w.name); loaded {
-		_ = wc.sup.Remove(tok.(suture.ServiceToken))
+	if tok, loaded := info.children.LoadAndDelete(w.name); loaded {
+		_ = info.sup.Remove(tok.(suture.ServiceToken))
 	}
 	// Each child gets its own supervisor subtree, scoped to this parent.
-	tok := addWorkerToSupervisor(wc.sup, w, wc.metrics, wc.active)
-	wc.children.Store(w.name, tok)
+	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active)
+	info.children.Store(w.name, tok)
 }
 
-func (wc *workerContext) Remove(name string) {
-	if wc.sup == nil {
+// Remove stops a child worker by name.
+func (info *WorkerInfo) Remove(name string) {
+	if info.sup == nil {
 		return
 	}
-	if tok, loaded := wc.children.LoadAndDelete(name); loaded {
-		_ = wc.sup.Remove(tok.(suture.ServiceToken))
+	if tok, loaded := info.children.LoadAndDelete(name); loaded {
+		_ = info.sup.Remove(tok.(suture.ServiceToken))
 	}
 }
 
-func (wc *workerContext) Children() []string {
+// Children returns the names of currently running child workers.
+func (info *WorkerInfo) Children() []string {
 	var names []string
-	wc.children.Range(func(key, _ any) bool {
-		names = append(names, key.(string))
-		return true
-	})
-	sort.Strings(names)
+	if info.children != nil {
+		info.children.Range(func(key, _ any) bool {
+			names = append(names, key.(string))
+			return true
+		})
+	}
+	slices.Sort(names)
 	return names
 }
 
-func newWorkerContext(ctx context.Context, name string, attempt int, sup *suture.Supervisor, metrics Metrics, active *atomic.Int32) WorkerContext {
-	if metrics == nil {
-		metrics = BaseMetrics{}
-	}
-	return &workerContext{Context: ctx, name: name, attempt: attempt, sup: sup, metrics: metrics, active: active}
+// CycleHandler handles worker execution cycles.
+// For periodic workers, RunCycle is called once per tick.
+// Close is called once when the worker stops, allowing cleanup of resources.
+type CycleHandler interface {
+	RunCycle(ctx context.Context, info *WorkerInfo) error
+	Close() error
 }
 
+// CycleFunc adapts a plain function into a [CycleHandler].
+// Close is a no-op — use this for simple, stateless handlers.
+type CycleFunc func(ctx context.Context, info *WorkerInfo) error
+
+func (fn CycleFunc) RunCycle(ctx context.Context, info *WorkerInfo) error { return fn(ctx, info) }
+
+// Close is a no-op for CycleFunc.
+func (fn CycleFunc) Close() error { return nil }
+
+// Middleware intercepts each execution cycle.
+// Call next to continue the chain. Matches gRPC interceptor convention.
+type Middleware func(ctx context.Context, info *WorkerInfo, next CycleFunc) error
+
 // Worker represents a background goroutine managed by the framework.
-// Create with NewWorker and configure with builder methods.
+// Create with [NewWorker] and configure with builder methods.
 type Worker struct {
 	name             string
-	run              func(WorkerContext) error
+	handler          CycleHandler
+	interceptors     []Middleware
+	interval         time.Duration // stored as data, wrapping deferred to startup
+	jitterPercent    int           // -1 = inherit run-level default, 0 = no jitter
+	initialDelay     time.Duration
 	restartOnFail    bool
 	failureDecay     float64
 	failureThreshold float64
@@ -136,10 +176,59 @@ type Worker struct {
 	metrics          Metrics // nil means inherit from parent
 }
 
-// NewWorker creates a Worker with the given name and run function.
-// The run function should block until ctx is cancelled or an error occurs.
-func NewWorker(name string, run func(WorkerContext) error) *Worker {
-	return &Worker{name: name, run: run}
+// NewWorker creates a [Worker] with the given name.
+// Set the handler via [Worker.Handler] or [Worker.HandlerFunc].
+func NewWorker(name string) *Worker {
+	return &Worker{name: name, jitterPercent: -1}
+}
+
+// Handler sets the worker's [CycleHandler]. Use this for handlers that
+// need cleanup via Close (e.g., database connections, leases).
+func (w *Worker) Handler(h CycleHandler) *Worker {
+	w.handler = h
+	return w
+}
+
+// HandlerFunc sets the worker's handler from a plain function.
+// This is the common case for simple, stateless workers.
+func (w *Worker) HandlerFunc(fn CycleFunc) *Worker {
+	w.handler = fn
+	return w
+}
+
+// Every configures the worker to run periodically at the given interval.
+// The interval is stored as data — wrapping is deferred to startup where
+// jitter configuration is resolved.
+func (w *Worker) Every(d time.Duration) *Worker {
+	w.interval = d
+	return w
+}
+
+// WithJitter sets per-worker jitter as a percentage of the base interval.
+// Each tick is randomized within ±percent of the base. Requires [Worker.Every].
+// Setting WithJitter(0) explicitly disables jitter even when a run-level
+// default is set via [WithDefaultJitter].
+func (w *Worker) WithJitter(percent int) *Worker {
+	w.jitterPercent = percent
+	return w
+}
+
+// WithInitialDelay delays the first tick to stagger startup. Requires [Worker.Every].
+func (w *Worker) WithInitialDelay(d time.Duration) *Worker {
+	w.initialDelay = d
+	return w
+}
+
+// Interceptors replaces the worker-level interceptor list.
+func (w *Worker) Interceptors(mw ...Middleware) *Worker {
+	w.interceptors = mw
+	return w
+}
+
+// AddInterceptors appends to the worker-level interceptor list.
+func (w *Worker) AddInterceptors(mw ...Middleware) *Worker {
+	w.interceptors = append(w.interceptors, mw...)
+	return w
 }
 
 // WithRestart configures whether the worker should be restarted on failure.
@@ -185,19 +274,9 @@ func (w *Worker) WithTimeout(d time.Duration) *Worker {
 }
 
 // WithMetrics sets a per-worker metrics implementation, overriding the
-// metrics inherited from the parent WorkerContext or Run options.
+// metrics inherited from the parent [WorkerInfo] or [Run] options.
 func (w *Worker) WithMetrics(m Metrics) *Worker {
 	w.metrics = m
-	return w
-}
-
-// Every wraps the run function in a ticker loop that calls it at the given interval.
-// The original run function is called once per tick. If it returns an error,
-// the behavior depends on WithRestart: if true, the ticker worker restarts;
-// if false, it exits.
-func (w *Worker) Every(d time.Duration) *Worker {
-	origRun := w.run
-	w.run = EveryInterval(d, origRun)
 	return w
 }
 

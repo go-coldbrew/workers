@@ -2,25 +2,25 @@ package workers
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"github.com/go-coldbrew/log"
-	"github.com/go-coldbrew/tracing"
 	"github.com/thejerf/suture/v4"
 )
 
-// RunOption configures the behavior of Run.
+// RunOption configures the behavior of [Run].
 type RunOption func(*runConfig)
 
 type runConfig struct {
-	metrics Metrics
+	metrics      Metrics
+	interceptors []Middleware
+	defaultJitter int // -1 = not set
 }
 
-// WithMetrics sets the metrics implementation for all workers started by Run.
-// Workers inherit this unless they override via Worker.WithMetrics.
-// If not set, BaseMetrics{} is used.
+// WithMetrics sets the metrics implementation for all workers started by [Run].
+// Workers inherit this unless they override via [Worker.WithMetrics].
+// If not set, [BaseMetrics] is used.
 func WithMetrics(m Metrics) RunOption {
 	return func(c *runConfig) {
 		if m != nil {
@@ -29,57 +29,101 @@ func WithMetrics(m Metrics) RunOption {
 	}
 }
 
+// WithInterceptors replaces the run-level interceptor list.
+// Run-level interceptors wrap outside worker-level interceptors.
+func WithInterceptors(mw ...Middleware) RunOption {
+	return func(c *runConfig) {
+		c.interceptors = mw
+	}
+}
+
+// AddInterceptors appends to the run-level interceptor list.
+func AddInterceptors(mw ...Middleware) RunOption {
+	return func(c *runConfig) {
+		c.interceptors = append(c.interceptors, mw...)
+	}
+}
+
+// WithDefaultJitter sets a run-level default jitter percentage for all
+// periodic workers. Worker-level [Worker.WithJitter] takes precedence.
+// Setting Worker.WithJitter(0) disables jitter for a specific worker
+// even when a run-level default is set.
+func WithDefaultJitter(percent int) RunOption {
+	return func(c *runConfig) {
+		c.defaultJitter = percent
+	}
+}
+
+// buildChain constructs a [CycleFunc] that walks the middleware list on each
+// call, terminating at handler.RunCycle. The first middleware in the list is
+// the outermost (runs first on entry, last on exit).
+func buildChain(middlewares []Middleware, handler CycleHandler) CycleFunc {
+	final := CycleFunc(handler.RunCycle)
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		mw := middlewares[i]
+		next := final
+		final = func(ctx context.Context, info *WorkerInfo) error {
+			return mw(ctx, info, next)
+		}
+	}
+	return final
+}
+
 // workerRunService wraps the actual Run func as a suture.Service
 // that runs inside the worker's own child supervisor.
 type workerRunService struct {
 	w        *Worker
+	runFn    CycleFunc          // fully resolved: chain + interval wrapping
+	handler  CycleHandler       // original handler, for Close()
 	childSup *suture.Supervisor
 	metrics  Metrics
 	active   *atomic.Int32
-	mu       sync.Mutex
-	attempt  int
+	cfg      *runConfig
+	attempt  atomic.Int32
 }
 
 // Serve implements suture.Service.
 func (ws *workerRunService) Serve(ctx context.Context) error {
-	ws.mu.Lock()
-	attempt := ws.attempt
-	ws.attempt++
-	ws.mu.Unlock()
+	attempt := int(ws.attempt.Add(1) - 1)
 
 	m := ws.metrics
 
 	m.WorkerStarted(ws.w.name)
-	ws.active.Add(1)
-	m.SetActiveWorkers(int(ws.active.Load()))
+	m.SetActiveWorkers(int(ws.active.Add(1)))
 
-	start := time.Now()
 	defer func() {
 		m.WorkerStopped(ws.w.name)
-		ws.active.Add(-1)
-		m.SetActiveWorkers(int(ws.active.Load()))
-		m.ObserveRunDuration(ws.w.name, time.Since(start))
+		m.SetActiveWorkers(int(ws.active.Add(-1)))
 	}()
 
 	if attempt > 0 {
 		m.WorkerRestarted(ws.w.name, attempt)
 	}
 
-	span, ctx := tracing.NewInternalSpan(ctx, "worker:"+ws.w.name)
-	defer span.Finish()
+	info := &WorkerInfo{
+		name:     ws.w.name,
+		attempt:  attempt,
+		sup:      ws.childSup,
+		children: &sync.Map{},
+		cfg:      ws.cfg,
+		active:   ws.active,
+		metrics:  m,
+	}
 
-	// Inject worker name and attempt into log context so all log calls
-	// inside the worker automatically include them.
-	ctx = log.AddToContext(ctx, "worker", ws.w.name)
-	ctx = log.AddToContext(ctx, "attempt", attempt)
+	defer func() {
+		if ws.handler != nil {
+			_ = ws.handler.Close()
+		}
+	}()
 
-	wctx := newWorkerContext(ctx, ws.w.name, attempt, ws.childSup, m, ws.active)
-	err := ws.w.run(wctx)
+	err := ws.runFn(ctx, info)
 
 	if err != nil && ctx.Err() == nil {
 		m.WorkerFailed(ws.w.name, err)
 	}
 
+	// Suppress restart when the worker doesn't want it and either exited
+	// cleanly or the context was cancelled (graceful shutdown).
 	if !ws.w.restartOnFail && (err == nil || ctx.Err() != nil) {
 		return suture.ErrDoNotRestart
 	}
@@ -103,12 +147,43 @@ func resolveMetrics(w *Worker, parent Metrics) Metrics {
 }
 
 // addWorkerToSupervisor creates a child supervisor for the worker,
-// adds the worker's run func as a service inside it, and adds the
-// child supervisor to the parent. Returns the service token for removal.
-func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, metrics Metrics, active *atomic.Int32) suture.ServiceToken {
-	m := resolveMetrics(w, metrics)
+// builds the middleware chain, resolves jitter, and adds the worker
+// to the parent supervisor. Returns the service token for removal.
+func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32) suture.ServiceToken {
+	m := resolveMetrics(w, cfg.metrics)
+
+	handler := w.handler
+	if handler == nil {
+		handler = CycleFunc(func(ctx context.Context, _ *WorkerInfo) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+
+	// Build middleware chain: run-level → worker-level → handler.RunCycle
+	allMiddleware := make([]Middleware, 0, len(cfg.interceptors)+len(w.interceptors))
+	allMiddleware = append(allMiddleware, cfg.interceptors...)
+	allMiddleware = append(allMiddleware, w.interceptors...)
+
+	runFn := buildChain(allMiddleware, handler)
+
+	// If periodic, wrap with interval/jitter.
+	if w.interval > 0 {
+		jitter := w.jitterPercent
+		if jitter == -1 && cfg.defaultJitter > 0 {
+			jitter = cfg.defaultJitter
+		}
+		if jitter < 0 {
+			jitter = 0
+		}
+		runFn = everyIntervalWithJitter(w.interval, jitter, w.initialDelay, runFn)
+	}
+
 	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
-	childSup.Add(&workerRunService{w: w, childSup: childSup, metrics: m, active: active})
+	childSup.Add(&workerRunService{
+		w: w, runFn: runFn, handler: handler,
+		childSup: childSup, metrics: m, active: active, cfg: cfg,
+	})
 	return parent.Add(childSup)
 }
 
@@ -118,7 +193,7 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, metrics Metrics
 // A worker exiting early (without restart) does not stop other workers.
 // Returns nil on clean shutdown.
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
-	cfg := &runConfig{metrics: BaseMetrics{}}
+	cfg := &runConfig{metrics: BaseMetrics{}, defaultJitter: -1}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -129,7 +204,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 		EventHook: makeEventHook(cfg.metrics),
 	})
 	for _, w := range workers {
-		addWorkerToSupervisor(root, w, cfg.metrics, active)
+		addWorkerToSupervisor(root, w, cfg, active)
 	}
 	err := root.Serve(ctx)
 	if err != nil && ctx.Err() != nil {
@@ -148,21 +223,23 @@ func RunWorker(ctx context.Context, w *Worker, opts ...RunOption) {
 // panic metrics.
 func makeEventHook(m Metrics) suture.EventHook {
 	return func(e suture.Event) {
-		ctx := context.Background()
 		em := e.Map()
 		switch e.Type() {
 		case suture.EventTypeServicePanic:
 			name, _ := em["service_name"].(string)
 			m.WorkerPanicked(name)
-			log.Error(ctx, "msg", "worker panicked", "worker", em["service_name"], "event", e.String())
+			slog.Error("worker panicked", "worker", em["service_name"], "event", e.String())
 		case suture.EventTypeServiceTerminate:
-			log.Warn(ctx, "msg", "worker terminated", "worker", em["service_name"], "event", e.String())
+			slog.Warn("worker terminated", "worker", em["service_name"], "event", e.String())
 		case suture.EventTypeBackoff:
-			log.Warn(ctx, "msg", "worker backoff", "event", e.String())
+			slog.Warn("worker backoff", "event", e.String())
 		case suture.EventTypeResume:
-			log.Info(ctx, "msg", "worker resumed", "event", e.String())
+			slog.Info("worker resumed", "event", e.String())
 		case suture.EventTypeStopTimeout:
-			log.Error(ctx, "msg", "worker stop timeout", "worker", em["service_name"], "event", e.String())
+			slog.Error("worker stop timeout", "worker", em["service_name"], "event", e.String())
 		}
 	}
 }
+
+// Ensure workerRunService implements suture.Service at compile time.
+var _ suture.Service = (*workerRunService)(nil)

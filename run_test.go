@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 func TestRun_BasicLifecycle(t *testing.T) {
 	var started atomic.Bool
-	w := NewWorker("basic", func(ctx WorkerContext) error {
+	w := NewWorker("basic").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		started.Store(true)
 		<-ctx.Done()
 		return ctx.Err()
@@ -29,7 +30,7 @@ func TestRun_BasicLifecycle(t *testing.T) {
 func TestRun_MultipleWorkers(t *testing.T) {
 	var count atomic.Int32
 	mkWorker := func(name string) *Worker {
-		return NewWorker(name, func(ctx WorkerContext) error {
+		return NewWorker(name).HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 			count.Add(1)
 			<-ctx.Done()
 			return ctx.Err()
@@ -46,7 +47,7 @@ func TestRun_MultipleWorkers(t *testing.T) {
 
 func TestRun_WorkerPanicRecovery(t *testing.T) {
 	var attempts atomic.Int32
-	w := NewWorker("panicker", func(ctx WorkerContext) error {
+	w := NewWorker("panicker").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		a := attempts.Add(1)
 		if a == 1 {
 			panic("boom")
@@ -65,7 +66,7 @@ func TestRun_WorkerPanicRecovery(t *testing.T) {
 
 func TestRun_RestartOnFail(t *testing.T) {
 	var attempts atomic.Int32
-	w := NewWorker("failer", func(ctx WorkerContext) error {
+	w := NewWorker("failer").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		a := attempts.Add(1)
 		if a <= 2 {
 			return errors.New("transient error")
@@ -84,7 +85,7 @@ func TestRun_RestartOnFail(t *testing.T) {
 
 func TestRun_NoRestartOnFail(t *testing.T) {
 	var attempts atomic.Int32
-	w := NewWorker("oneshot", func(ctx WorkerContext) error {
+	w := NewWorker("oneshot").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
 		attempts.Add(1)
 		return nil // exits cleanly
 	})
@@ -97,10 +98,10 @@ func TestRun_NoRestartOnFail(t *testing.T) {
 	assert.Equal(t, int32(1), attempts.Load(), "should not restart")
 }
 
-func TestRun_WorkerContextName(t *testing.T) {
+func TestRun_WorkerInfoName(t *testing.T) {
 	var gotName string
-	w := NewWorker("named-worker", func(ctx WorkerContext) error {
-		gotName = ctx.Name()
+	w := NewWorker("named-worker").HandlerFunc(func(_ context.Context, info *WorkerInfo) error {
+		gotName = info.Name()
 		return nil
 	})
 
@@ -111,10 +112,13 @@ func TestRun_WorkerContextName(t *testing.T) {
 	assert.Equal(t, "named-worker", gotName)
 }
 
-func TestRun_WorkerContextAttempt(t *testing.T) {
+func TestRun_WorkerInfoAttempt(t *testing.T) {
+	var mu sync.Mutex
 	var attempts []int
-	w := NewWorker("attempt-tracker", func(ctx WorkerContext) error {
-		attempts = append(attempts, ctx.Attempt())
+	w := NewWorker("attempt-tracker").HandlerFunc(func(ctx context.Context, info *WorkerInfo) error {
+		mu.Lock()
+		attempts = append(attempts, info.Attempt())
+		mu.Unlock()
 		if len(attempts) < 3 {
 			return errors.New("fail")
 		}
@@ -126,6 +130,8 @@ func TestRun_WorkerContextAttempt(t *testing.T) {
 	defer cancel()
 
 	_ = Run(ctx, []*Worker{w})
+	mu.Lock()
+	defer mu.Unlock()
 	assert.GreaterOrEqual(t, len(attempts), 3)
 	assert.Equal(t, 0, attempts[0])
 	assert.Equal(t, 1, attempts[1])
@@ -134,7 +140,7 @@ func TestRun_WorkerContextAttempt(t *testing.T) {
 
 func TestRunWorker_Single(t *testing.T) {
 	var started atomic.Bool
-	w := NewWorker("single", func(ctx WorkerContext) error {
+	w := NewWorker("single").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		started.Store(true)
 		<-ctx.Done()
 		return ctx.Err()
@@ -145,4 +151,174 @@ func TestRunWorker_Single(t *testing.T) {
 
 	RunWorker(ctx, w)
 	assert.True(t, started.Load())
+}
+
+func TestRun_WithInterceptors(t *testing.T) {
+	var order []string
+	var mu sync.Mutex
+
+	mw := func(tag string) Middleware {
+		return func(ctx context.Context, info *WorkerInfo, next CycleFunc) error {
+			mu.Lock()
+			order = append(order, tag+":before")
+			mu.Unlock()
+			err := next(ctx, info)
+			mu.Lock()
+			order = append(order, tag+":after")
+			mu.Unlock()
+			return err
+		}
+	}
+
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		mu.Lock()
+		order = append(order, "handler")
+		mu.Unlock()
+		return nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w}, WithInterceptors(mw("run")))
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"run:before", "handler", "run:after"}, order)
+}
+
+func TestRun_MiddlewareOrdering(t *testing.T) {
+	var order []string
+	var mu sync.Mutex
+
+	mw := func(tag string) Middleware {
+		return func(ctx context.Context, info *WorkerInfo, next CycleFunc) error {
+			mu.Lock()
+			order = append(order, tag)
+			mu.Unlock()
+			return next(ctx, info)
+		}
+	}
+
+	w := NewWorker("test").
+		HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+			mu.Lock()
+			order = append(order, "handler")
+			mu.Unlock()
+			return nil
+		}).
+		Interceptors(mw("worker-mw"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w}, WithInterceptors(mw("run-mw")))
+
+	mu.Lock()
+	defer mu.Unlock()
+	// Run-level wraps outside worker-level.
+	assert.Equal(t, []string{"run-mw", "worker-mw", "handler"}, order)
+}
+
+func TestRun_HandlerClose(t *testing.T) {
+	var closed atomic.Bool
+
+	handler := &closableHandler{
+		runCycle: func(ctx context.Context, _ *WorkerInfo) error {
+			return nil // exit immediately
+		},
+		close: func() error {
+			closed.Store(true)
+			return nil
+		},
+	}
+
+	w := NewWorker("test").Handler(handler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w})
+	assert.True(t, closed.Load(), "Close() should be called when worker stops")
+}
+
+type closableHandler struct {
+	runCycle func(ctx context.Context, info *WorkerInfo) error
+	close    func() error
+}
+
+func (h *closableHandler) RunCycle(ctx context.Context, info *WorkerInfo) error {
+	return h.runCycle(ctx, info)
+}
+
+func (h *closableHandler) Close() error {
+	return h.close()
+}
+
+func TestRun_NilHandler(t *testing.T) {
+	// Worker with no handler should not panic — uses default (block until ctx done).
+	w := NewWorker("nil-handler")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, []*Worker{w})
+	assert.NoError(t, err)
+}
+
+func TestBuildChain(t *testing.T) {
+	var order []string
+
+	mw1 := Middleware(func(ctx context.Context, info *WorkerInfo, next CycleFunc) error {
+		order = append(order, "mw1:before")
+		err := next(ctx, info)
+		order = append(order, "mw1:after")
+		return err
+	})
+	mw2 := Middleware(func(ctx context.Context, info *WorkerInfo, next CycleFunc) error {
+		order = append(order, "mw2:before")
+		err := next(ctx, info)
+		order = append(order, "mw2:after")
+		return err
+	})
+
+	handler := CycleFunc(func(_ context.Context, _ *WorkerInfo) error {
+		order = append(order, "handler")
+		return nil
+	})
+
+	chain := buildChain([]Middleware{mw1, mw2}, handler)
+	err := chain(context.Background(), &WorkerInfo{name: "test"})
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"mw1:before", "mw2:before", "handler", "mw2:after", "mw1:after"}, order)
+}
+
+func TestBuildChain_Empty(t *testing.T) {
+	called := false
+	handler := CycleFunc(func(_ context.Context, _ *WorkerInfo) error {
+		called = true
+		return nil
+	})
+
+	chain := buildChain(nil, handler)
+	err := chain(context.Background(), &WorkerInfo{name: "test"})
+	assert.NoError(t, err)
+	assert.True(t, called)
+}
+
+func TestRun_WithDefaultJitter(t *testing.T) {
+	// Verify that a periodic worker picks up run-level default jitter.
+	// We can't easily assert jitter randomness in a unit test, but we can
+	// verify the worker runs successfully with jitter enabled.
+	var count atomic.Int32
+	w := NewWorker("jittery").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		count.Add(1)
+		return nil
+	}).Every(10 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w}, WithDefaultJitter(20))
+	assert.GreaterOrEqual(t, int(count.Load()), 2, "should tick multiple times with jitter")
 }

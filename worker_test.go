@@ -11,25 +11,25 @@ import (
 
 func TestNewWorker(t *testing.T) {
 	called := false
-	w := NewWorker("test", func(ctx WorkerContext) error {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, info *WorkerInfo) error {
 		called = true
-		assert.Equal(t, "test", ctx.Name())
-		assert.Equal(t, 0, ctx.Attempt())
+		assert.Equal(t, "test", info.Name())
+		assert.Equal(t, 0, info.Attempt())
 		return nil
 	})
 	require.NotNil(t, w)
 	assert.Equal(t, "test", w.name)
 	assert.False(t, w.restartOnFail)
 
-	// Run it directly to verify
-	wctx := newWorkerContext(context.Background(), "test", 0, nil, nil, nil)
-	err := w.run(wctx)
+	// Run the handler directly to verify.
+	info := &WorkerInfo{name: "test", attempt: 0}
+	err := w.handler.RunCycle(context.Background(), info)
 	assert.NoError(t, err)
 	assert.True(t, called)
 }
 
 func TestWorker_WithRestart(t *testing.T) {
-	w := NewWorker("test", func(ctx WorkerContext) error { return nil })
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
 	assert.False(t, w.restartOnFail)
 
 	w.WithRestart(true)
@@ -37,25 +37,62 @@ func TestWorker_WithRestart(t *testing.T) {
 }
 
 func TestWorker_Every(t *testing.T) {
-	count := 0
-	w := NewWorker("ticker", func(ctx WorkerContext) error {
-		count++
+	w := NewWorker("ticker").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
 		return nil
 	}).Every(10 * time.Millisecond)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Millisecond)
-	defer cancel()
-
-	wctx := newWorkerContext(ctx, "ticker", 0, nil, nil, nil)
-	_ = w.run(wctx)
-	assert.GreaterOrEqual(t, count, 3, "should tick at least 3 times in 55ms with 10ms interval")
+	assert.Equal(t, 10*time.Millisecond, w.interval, "Every should store interval as data")
+	assert.NotNil(t, w.handler, "Every should NOT replace the handler (wrapping is deferred)")
 }
 
-func TestWorkerContext(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "key", "value")
-	wctx := newWorkerContext(ctx, "myworker", 3, nil, nil, nil)
+func TestWorker_WithJitter(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	assert.Equal(t, -1, w.jitterPercent, "default jitter should be -1 (inherit)")
 
-	assert.Equal(t, "myworker", wctx.Name())
-	assert.Equal(t, 3, wctx.Attempt())
-	assert.Equal(t, "value", wctx.Value("key"))
+	w.WithJitter(10)
+	assert.Equal(t, 10, w.jitterPercent)
+
+	w.WithJitter(0)
+	assert.Equal(t, 0, w.jitterPercent, "0 explicitly disables jitter")
+}
+
+func TestWorker_WithInitialDelay(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.WithInitialDelay(5 * time.Second)
+	assert.Equal(t, 5*time.Second, w.initialDelay)
+}
+
+func TestWorker_Interceptors(t *testing.T) {
+	mw1 := func(_ context.Context, _ *WorkerInfo, next CycleFunc) error { return next(nil, nil) }
+	mw2 := func(_ context.Context, _ *WorkerInfo, next CycleFunc) error { return next(nil, nil) }
+
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	assert.Empty(t, w.interceptors)
+
+	w.Interceptors(mw1)
+	assert.Len(t, w.interceptors, 1)
+
+	// Interceptors replaces.
+	w.Interceptors(mw2)
+	assert.Len(t, w.interceptors, 1)
+
+	// AddInterceptors appends.
+	w.AddInterceptors(mw1)
+	assert.Len(t, w.interceptors, 2)
+}
+
+func TestWorkerInfo(t *testing.T) {
+	info := &WorkerInfo{name: "myworker", attempt: 3}
+	assert.Equal(t, "myworker", info.Name())
+	assert.Equal(t, 3, info.Attempt())
+}
+
+func TestWorkerInfo_Children_Nil(t *testing.T) {
+	info := &WorkerInfo{name: "test"}
+	assert.Empty(t, info.Children(), "Children on nil map should return empty slice")
+}
+
+func TestCycleFunc_Close(t *testing.T) {
+	fn := CycleFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	assert.NoError(t, fn.Close(), "CycleFunc.Close should be a no-op")
 }
