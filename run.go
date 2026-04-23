@@ -149,7 +149,7 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 
 	err := ws.runFn(ctx, info)
 
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctx.Err() == nil && !errors.Is(err, suture.ErrDoNotRestart) {
 		m.WorkerFailed(ws.w.name, err)
 	}
 
@@ -185,8 +185,8 @@ func resolveMetrics(w *Worker, parent Metrics) Metrics {
 // addWorkerToSupervisor creates a child supervisor for the worker,
 // builds the middleware chain, resolves jitter, and adds the worker
 // to the parent supervisor. Returns the service token for removal.
-func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32) suture.ServiceToken {
-	m := resolveMetrics(w, cfg.metrics)
+func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32, parentMetrics Metrics) suture.ServiceToken {
+	m := resolveMetrics(w, parentMetrics)
 
 	handler := w.handler
 	if handler == nil {
@@ -241,7 +241,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 		EventHook: makeEventHook(cfg.metrics),
 	})
 	for _, w := range workers {
-		addWorkerToSupervisor(root, w, cfg, active)
+		addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
 	}
 	err := root.Serve(ctx)
 	if err != nil && ctx.Err() != nil {

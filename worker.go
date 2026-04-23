@@ -46,7 +46,7 @@
 // # Dynamic Workers
 //
 // Manager workers can spawn and remove child workers at runtime using
-// the Add, Remove, and Children methods on [WorkerInfo].
+// the Add, Remove, and GetChildren methods on [WorkerInfo].
 // Children join the parent's supervisor subtree and get full framework
 // guarantees (panic recovery, restart). See [Example_dynamicWorkerPool].
 //
@@ -110,11 +110,8 @@ func (info *WorkerInfo) Add(w *Worker) {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
-	if w.metrics == nil {
-		w.metrics = info.metrics
-	}
 	info.removeLocked(w.name)
-	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active)
+	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active, info.metrics)
 	info.children[w.name] = childEntry{token: tok, worker: w}
 }
 
