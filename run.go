@@ -153,9 +153,10 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 		m.WorkerFailed(ws.w.name, err)
 	}
 
-	// Suppress restart when the worker doesn't want it and either exited
-	// cleanly or the context was cancelled (graceful shutdown).
-	if !ws.w.restartOnFail && (err == nil || ctx.Err() != nil) {
+	// Suppress restart when: restart is disabled, handler exited cleanly,
+	// or context was cancelled. Only allow restarts when restartOnFail is
+	// true AND the handler returned a non-nil error AND the context is live.
+	if !ws.w.restartOnFail || err == nil || ctx.Err() != nil {
 		return suture.ErrDoNotRestart
 	}
 	// Unwrap wrapped ErrDoNotRestart so suture recognizes the sentinel.

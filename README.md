@@ -271,7 +271,7 @@ var ErrDoNotRestart = suture.ErrDoNotRestart
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L232>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L233>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -327,7 +327,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L255>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L256>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)

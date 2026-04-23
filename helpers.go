@@ -103,9 +103,9 @@ func BatchChannelWorker[T any](ch <-chan T, maxSize int, maxDelay time.Duration,
 		for {
 			select {
 			case <-ctx.Done():
-				// Best-effort flush on shutdown — error is dropped because
-				// the context is already cancelled and the caller gets ctx.Err().
-				_ = flush()
+				if err := flush(); err != nil {
+					return err
+				}
 				return ctx.Err()
 
 			case item, ok := <-ch:
