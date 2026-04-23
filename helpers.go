@@ -69,7 +69,7 @@ func ChannelWorker[T any](ch <-chan T, fn func(ctx context.Context, info *Worker
 				return ctx.Err()
 			case item, ok := <-ch:
 				if !ok {
-					return nil // channel closed
+					return ErrDoNotRestart // channel closed, nothing left to do
 				}
 				if err := fn(ctx, info, item); err != nil {
 					return err
@@ -108,8 +108,9 @@ func BatchChannelWorker[T any](ch <-chan T, maxSize int, maxDelay time.Duration,
 
 			case item, ok := <-ch:
 				if !ok {
-					// Channel closed — flush and return.
-					return flush()
+					// Channel closed — flush remaining and stop permanently.
+					_ = flush()
+					return ErrDoNotRestart
 				}
 				if len(batch) == 0 {
 					timer.Reset(maxDelay)

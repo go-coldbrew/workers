@@ -41,7 +41,7 @@ Create workers with [NewWorker](<#NewWorker>) and run them with [Run](<#Run>):
 ```
 workers.Run(ctx, []*workers.Worker{
     workers.NewWorker("kafka").HandlerFunc(consume),
-    workers.NewWorker("cleanup").HandlerFunc(cleanup).Every(5 * time.Minute).WithRestart(true),
+    workers.NewWorker("cleanup").HandlerFunc(cleanup).Every(5 * time.Minute),
 })
 ```
 
@@ -208,6 +208,7 @@ shutdown complete
 
 ## Index
 
+- [Variables](<#variables>)
 - [func Run\(ctx context.Context, workers \[\]\*Worker, opts ...RunOption\) error](<#Run>)
 - [func RunWorker\(ctx context.Context, w \*Worker, opts ...RunOption\)](<#RunWorker>)
 - [type BaseMetrics](<#BaseMetrics>)
@@ -261,8 +262,16 @@ shutdown complete
   - [func \(info \*WorkerInfo\) Remove\(name string\)](<#WorkerInfo.Remove>)
 
 
+## Variables
+
+<a name="ErrDoNotRestart"></a>ErrDoNotRestart can be returned from a handler to signal that the worker should not be restarted, even when restart is enabled. Use this for permanent completion \(e.g., channel closed, work exhausted\).
+
+```go
+var ErrDoNotRestart = suture.ErrDoNotRestart
+```
+
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L222>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L227>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -318,7 +327,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L245>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L250>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
@@ -691,7 +700,7 @@ type Middleware func(ctx context.Context, info *WorkerInfo, next CycleFunc) erro
 ```
 
 <a name="RunOption"></a>
-## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L13>)
+## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L18>)
 
 RunOption configures the behavior of [Run](<#Run>).
 
@@ -700,7 +709,7 @@ type RunOption func(*runConfig)
 ```
 
 <a name="AddInterceptors"></a>
-### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L41>)
+### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L46>)
 
 ```go
 func AddInterceptors(mw ...Middleware) RunOption
@@ -709,7 +718,7 @@ func AddInterceptors(mw ...Middleware) RunOption
 AddInterceptors appends to the run\-level interceptor list.
 
 <a name="WithDefaultJitter"></a>
-### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L51>)
+### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L56>)
 
 ```go
 func WithDefaultJitter(percent int) RunOption
@@ -718,7 +727,7 @@ func WithDefaultJitter(percent int) RunOption
 WithDefaultJitter sets a run\-level default jitter percentage for all periodic workers. Worker\-level [Worker.WithJitter](<#Worker.WithJitter>) takes precedence. Setting Worker.WithJitter\(0\) disables jitter for a specific worker even when a run\-level default is set.
 
 <a name="WithInterceptors"></a>
-### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L34>)
+### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L39>)
 
 ```go
 func WithInterceptors(mw ...Middleware) RunOption
@@ -727,7 +736,7 @@ func WithInterceptors(mw ...Middleware) RunOption
 WithInterceptors replaces the run\-level interceptor list. Run\-level interceptors wrap outside worker\-level interceptors.
 
 <a name="WithMetrics"></a>
-### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L24>)
+### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L29>)
 
 ```go
 func WithMetrics(m Metrics) RunOption
@@ -949,7 +958,7 @@ func main() {
 </details>
 
 <a name="Worker.WithBackoffJitter"></a>
-### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L295>)
+### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L296>)
 
 ```go
 func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker
@@ -958,7 +967,7 @@ func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker
 WithBackoffJitter adds random jitter to the backoff duration to prevent thundering herd on coordinated restarts.
 
 <a name="Worker.WithFailureBackoff"></a>
-### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L288>)
+### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L289>)
 
 ```go
 func (w *Worker) WithFailureBackoff(d time.Duration) *Worker
@@ -967,7 +976,7 @@ func (w *Worker) WithFailureBackoff(d time.Duration) *Worker
 WithFailureBackoff sets the duration to wait between restarts. Suture default is 15 seconds.
 
 <a name="Worker.WithFailureDecay"></a>
-### func \(\*Worker\) [WithFailureDecay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L274>)
+### func \(\*Worker\) [WithFailureDecay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L275>)
 
 ```go
 func (w *Worker) WithFailureDecay(decay float64) *Worker
@@ -976,7 +985,7 @@ func (w *Worker) WithFailureDecay(decay float64) *Worker
 WithFailureDecay sets the rate at which failure count decays over time. A value of 1.0 means failures decay by one per second. Suture default is 1.0.
 
 <a name="Worker.WithFailureThreshold"></a>
-### func \(\*Worker\) [WithFailureThreshold](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L281>)
+### func \(\*Worker\) [WithFailureThreshold](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L282>)
 
 ```go
 func (w *Worker) WithFailureThreshold(threshold float64) *Worker
@@ -1003,7 +1012,7 @@ func (w *Worker) WithJitter(percent int) *Worker
 WithJitter sets per\-worker jitter as a percentage of the base interval. Each tick is randomized within ±percent of the base. Requires [Worker.Every](<#Worker.Every>). Setting WithJitter\(0\) explicitly disables jitter even when a run\-level default is set via [WithDefaultJitter](<#WithDefaultJitter>).
 
 <a name="Worker.WithMetrics"></a>
-### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L309>)
+### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L310>)
 
 ```go
 func (w *Worker) WithMetrics(m Metrics) *Worker
@@ -1012,13 +1021,13 @@ func (w *Worker) WithMetrics(m Metrics) *Worker
 WithMetrics sets a per\-worker metrics implementation, overriding the metrics inherited from the parent [WorkerInfo](<#WorkerInfo>) or [Run](<#Run>) options.
 
 <a name="Worker.WithRestart"></a>
-### func \(\*Worker\) [WithRestart](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L267>)
+### func \(\*Worker\) [WithRestart](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L268>)
 
 ```go
 func (w *Worker) WithRestart(restart bool) *Worker
 ```
 
-WithRestart configures whether the worker should be restarted on failure. When true, the supervisor restarts the worker with backoff on non\-context errors.
+WithRestart configures whether the worker should be restarted on failure. Default is true. Set to false for one\-shot workers that should exit after completion or failure.
 
 <details><summary>Example</summary>
 <p>
@@ -1061,7 +1070,7 @@ func main() {
 </details>
 
 <a name="Worker.WithTimeout"></a>
-### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L302>)
+### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L303>)
 
 ```go
 func (w *Worker) WithTimeout(d time.Duration) *Worker

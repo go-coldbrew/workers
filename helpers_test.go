@@ -151,7 +151,7 @@ func TestChannelWorker(t *testing.T) {
 
 	info := &WorkerInfo{name: "ch", attempt: 0}
 	err := fn(context.Background(), info)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrDoNotRestart)
 	assert.Equal(t, []string{"a", "b", "c"}, items)
 }
 
@@ -187,7 +187,7 @@ func TestBatchChannelWorker_MaxSize(t *testing.T) {
 
 	info := &WorkerInfo{name: "batch", attempt: 0}
 	err := fn(context.Background(), info)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrDoNotRestart)
 	assert.Equal(t, 2, len(batches))
 	assert.Equal(t, []int{0, 1, 2}, batches[0])
 	assert.Equal(t, []int{3, 4, 5}, batches[1])
@@ -231,7 +231,7 @@ func TestBatchChannelWorker_FlushOnClose(t *testing.T) {
 
 	info := &WorkerInfo{name: "batch", attempt: 0}
 	err := fn(context.Background(), info)
-	assert.NoError(t, err)
+	assert.ErrorIs(t, err, ErrDoNotRestart)
 	assert.Equal(t, 1, len(batches))
 	assert.Equal(t, []int{1, 2}, batches[0])
 }

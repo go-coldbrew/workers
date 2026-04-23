@@ -19,7 +19,7 @@ func TestNewWorker(t *testing.T) {
 	})
 	require.NotNil(t, w)
 	assert.Equal(t, "test", w.name)
-	assert.False(t, w.restartOnFail)
+	assert.True(t, w.restartOnFail, "restart should be true by default")
 
 	// Run the handler directly to verify.
 	info := &WorkerInfo{name: "test", attempt: 0}
@@ -30,10 +30,10 @@ func TestNewWorker(t *testing.T) {
 
 func TestWorker_WithRestart(t *testing.T) {
 	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
-	assert.False(t, w.restartOnFail)
+	assert.True(t, w.restartOnFail, "default should be true")
 
-	w.WithRestart(true)
-	assert.True(t, w.restartOnFail)
+	w.WithRestart(false)
+	assert.False(t, w.restartOnFail)
 }
 
 func TestWorker_Every(t *testing.T) {

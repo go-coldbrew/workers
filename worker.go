@@ -16,7 +16,7 @@
 //
 //	workers.Run(ctx, []*workers.Worker{
 //	    workers.NewWorker("kafka").HandlerFunc(consume),
-//	    workers.NewWorker("cleanup").HandlerFunc(cleanup).Every(5 * time.Minute).WithRestart(true),
+//	    workers.NewWorker("cleanup").HandlerFunc(cleanup).Every(5 * time.Minute),
 //	})
 //
 // # Middleware
@@ -204,7 +204,7 @@ type Worker struct {
 // NewWorker creates a [Worker] with the given name.
 // Set the handler via [Worker.Handler] or [Worker.HandlerFunc].
 func NewWorker(name string) *Worker {
-	return &Worker{name: name, jitterPercent: -1}
+	return &Worker{name: name, jitterPercent: -1, restartOnFail: true}
 }
 
 // GetName returns the worker's name.
@@ -263,7 +263,8 @@ func (w *Worker) AddInterceptors(mw ...Middleware) *Worker {
 }
 
 // WithRestart configures whether the worker should be restarted on failure.
-// When true, the supervisor restarts the worker with backoff on non-context errors.
+// Default is true. Set to false for one-shot workers that should exit after
+// completion or failure.
 func (w *Worker) WithRestart(restart bool) *Worker {
 	w.restartOnFail = restart
 	return w

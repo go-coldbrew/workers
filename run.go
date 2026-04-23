@@ -9,6 +9,11 @@ import (
 	"github.com/thejerf/suture/v4"
 )
 
+// ErrDoNotRestart can be returned from a handler to signal that the worker
+// should not be restarted, even when restart is enabled. Use this for
+// permanent completion (e.g., channel closed, work exhausted).
+var ErrDoNotRestart = suture.ErrDoNotRestart
+
 // RunOption configures the behavior of [Run].
 type RunOption func(*runConfig)
 

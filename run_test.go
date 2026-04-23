@@ -88,7 +88,7 @@ func TestRun_NoRestartOnFail(t *testing.T) {
 	w := NewWorker("oneshot").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
 		attempts.Add(1)
 		return nil // exits cleanly
-	})
+	}).WithRestart(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -103,7 +103,7 @@ func TestRun_WorkerInfoName(t *testing.T) {
 	w := NewWorker("named-worker").HandlerFunc(func(_ context.Context, info *WorkerInfo) error {
 		gotName = info.Name()
 		return nil
-	})
+	}).WithRestart(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -175,7 +175,7 @@ func TestRun_WithInterceptors(t *testing.T) {
 		order = append(order, "handler")
 		mu.Unlock()
 		return nil
-	})
+	}).WithRestart(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -207,7 +207,8 @@ func TestRun_MiddlewareOrdering(t *testing.T) {
 			mu.Unlock()
 			return nil
 		}).
-		Interceptors(mw("worker-mw"))
+		Interceptors(mw("worker-mw")).
+		WithRestart(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -286,7 +287,7 @@ func (h *closableHandler) Close() error {
 
 func TestRun_NilHandler(t *testing.T) {
 	// Worker with no handler should not panic — uses default (block until ctx done).
-	w := NewWorker("nil-handler")
+	w := NewWorker("nil-handler").WithRestart(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
