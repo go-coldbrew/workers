@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/thejerf/suture/v4"
 )
@@ -108,7 +109,9 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	m.WorkerStarted(ws.w.name)
 	m.SetActiveWorkers(int(ws.active.Add(1)))
 
+	start := time.Now()
 	defer func() {
+		m.ObserveRunDuration(ws.w.name, time.Since(start))
 		m.WorkerStopped(ws.w.name)
 		m.SetActiveWorkers(int(ws.active.Add(-1)))
 	}()
