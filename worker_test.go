@@ -46,8 +46,8 @@ func TestWorker_Every(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Millisecond)
 	defer cancel()
 
-	wctx := newWorkerContext(ctx, "ticker", 0, nil, nil, nil)
-	_ = w.run(wctx)
+	// Every() stores the interval; the ticker loop is built by Run.
+	_ = Run(ctx, []*Worker{w})
 	assert.GreaterOrEqual(t, count, 3, "should tick at least 3 times in 55ms with 10ms interval")
 }
 

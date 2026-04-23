@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-coldbrew/workers"
+	"github.com/go-coldbrew/workers/middleware"
 )
 
 // A simple worker that runs until cancelled.
@@ -265,6 +266,123 @@ func ExampleWorkerContext_Add_replace() {
 	// Output:
 	// processor v1
 	// processor v2
+}
+
+// A periodic worker with jitter to desynchronize ticks across instances.
+// WithJitter(10) on a 20ms interval yields ticks in [18ms, 22ms).
+func ExampleWorker_WithJitter() {
+	count := 0
+	w := workers.NewWorker("jittered", func(ctx workers.WorkerContext) error {
+		count++
+		if count <= 3 {
+			fmt.Printf("tick %d\n", count)
+		}
+		return nil
+	}).Every(20 * time.Millisecond).WithJitter(10)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{w})
+	// Output:
+	// tick 1
+	// tick 2
+	// tick 3
+}
+
+// WithInitialDelay staggers the first tick to prevent thundering herd at startup.
+func ExampleWorker_WithInitialDelay() {
+	w := workers.NewWorker("delayed", func(ctx workers.WorkerContext) error {
+		fmt.Println("first tick after delay")
+		<-ctx.Done()
+		return ctx.Err()
+	}).Every(10 * time.Millisecond).WithInitialDelay(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{w})
+	// Output: first tick after delay
+}
+
+// Use attaches middleware to a worker. Middleware wraps each execution cycle.
+// WorkerInfo is passed explicitly — no need for FromContext.
+func ExampleWorker_Use() {
+	// A simple logging middleware using the explicit info parameter.
+	logCycle := func(next workers.CycleHandler) workers.CycleHandler {
+		return workers.CycleFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
+			fmt.Printf("before %s\n", info.Name)
+			err := next.RunCycle(ctx, info)
+			fmt.Printf("after %s\n", info.Name)
+			return err
+		})
+	}
+
+	w := workers.NewWorker("middleware-demo", func(ctx workers.WorkerContext) error {
+		fmt.Println("work")
+		return nil
+	}).Use(logCycle)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{w})
+	// Output:
+	// before middleware-demo
+	// work
+	// after middleware-demo
+}
+
+// WithMiddleware sets run-level middleware applied to all workers.
+// Run-level middleware wraps outside worker-level middleware.
+func ExampleWithMiddleware() {
+	counter := func(label string) workers.Middleware {
+		return func(next workers.CycleHandler) workers.CycleHandler {
+			return workers.CycleFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
+				fmt.Printf("%s:enter\n", label)
+				err := next.RunCycle(ctx, info)
+				fmt.Printf("%s:exit\n", label)
+				return err
+			})
+		}
+	}
+
+	w := workers.NewWorker("ordered", func(ctx workers.WorkerContext) error {
+		fmt.Println("fn")
+		return nil
+	}).Use(counter("worker"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{w}, workers.WithMiddleware(counter("run")))
+	// Output:
+	// run:enter
+	// worker:enter
+	// fn
+	// worker:exit
+	// run:exit
+}
+
+// Composing multiple middleware: Duration measures timing, Recover catches panics.
+func Example_composedMiddleware() {
+	w := workers.NewWorker("composed", func(ctx workers.WorkerContext) error {
+		fmt.Println("work done")
+		return nil
+	}).Use(
+		middleware.Recover(nil),
+		middleware.Duration(func(name string, d time.Duration) {
+			fmt.Printf("duration observed for %s\n", name)
+		}),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{w})
+	// Output:
+	// work done
+	// duration observed for composed
 }
 
 // Simulates a config-driven worker pool manager that reconciles

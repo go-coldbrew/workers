@@ -72,7 +72,7 @@ type workerContext struct {
 	attempt  int
 	sup      *suture.Supervisor
 	children sync.Map // name (string) → suture.ServiceToken
-	metrics  Metrics
+	cfg      *runConfig
 	active   *atomic.Int32
 }
 
@@ -85,14 +85,14 @@ func (wc *workerContext) Add(w *Worker) {
 	}
 	// Inherit parent metrics if the child doesn't override.
 	if w.metrics == nil {
-		w.metrics = wc.metrics
+		w.metrics = wc.cfg.metrics
 	}
 	// Remove existing worker with the same name (replace semantics).
 	if tok, loaded := wc.children.LoadAndDelete(w.name); loaded {
 		_ = wc.sup.Remove(tok.(suture.ServiceToken))
 	}
 	// Each child gets its own supervisor subtree, scoped to this parent.
-	tok := addWorkerToSupervisor(wc.sup, w, wc.metrics, wc.active)
+	tok := addWorkerToSupervisor(wc.sup, w, wc.cfg, wc.active)
 	wc.children.Store(w.name, tok)
 }
 
@@ -115,11 +115,11 @@ func (wc *workerContext) Children() []string {
 	return names
 }
 
-func newWorkerContext(ctx context.Context, name string, attempt int, sup *suture.Supervisor, metrics Metrics, active *atomic.Int32) WorkerContext {
-	if metrics == nil {
-		metrics = BaseMetrics{}
+func newWorkerContext(ctx context.Context, name string, attempt int, sup *suture.Supervisor, cfg *runConfig, active *atomic.Int32) WorkerContext {
+	if cfg == nil {
+		cfg = &runConfig{metrics: BaseMetrics{}}
 	}
-	return &workerContext{Context: ctx, name: name, attempt: attempt, sup: sup, metrics: metrics, active: active}
+	return &workerContext{Context: ctx, name: name, attempt: attempt, sup: sup, cfg: cfg, active: active}
 }
 
 // Worker represents a background goroutine managed by the framework.
@@ -134,6 +134,10 @@ type Worker struct {
 	backoffJitter    *suture.Jitter
 	timeout          time.Duration
 	metrics          Metrics // nil means inherit from parent
+	interval         time.Duration
+	jitterPercent    *int
+	initialDelay     time.Duration
+	middlewares      []Middleware
 }
 
 // NewWorker creates a Worker with the given name and run function.
@@ -191,13 +195,48 @@ func (w *Worker) WithMetrics(m Metrics) *Worker {
 	return w
 }
 
-// Every wraps the run function in a ticker loop that calls it at the given interval.
+// Every configures the worker to run its function periodically at the given interval.
 // The original run function is called once per tick. If it returns an error,
 // the behavior depends on WithRestart: if true, the ticker worker restarts;
 // if false, it exits.
+//
+// The interval loop is constructed when the worker starts, not when Every is called.
+// This allows WithJitter and WithDefaultJitter to influence the loop behavior.
 func (w *Worker) Every(d time.Duration) *Worker {
-	origRun := w.run
-	w.run = EveryInterval(d, origRun)
+	w.interval = d
+	return w
+}
+
+// WithJitter sets the jitter percentage for periodic workers (set via Every).
+// Each tick's interval is randomized within ±percent of the base interval.
+// For example, WithJitter(20) on a 100ms interval yields intervals in [80ms, 120ms).
+// Requires Every to have been called; has no effect on non-periodic workers.
+// Worker-level jitter takes precedence over run-level WithDefaultJitter.
+func (w *Worker) WithJitter(percent int) *Worker {
+	w.jitterPercent = &percent
+	return w
+}
+
+// WithInitialDelay delays the first tick of a periodic worker by the given duration.
+// Pairs with WithJitter to stagger workers that share the same interval,
+// preventing thundering herd at process startup.
+// The delay runs outside the middleware chain — middleware only wraps each tick.
+// Has no effect on non-periodic workers.
+func (w *Worker) WithInitialDelay(d time.Duration) *Worker {
+	w.initialDelay = d
+	return w
+}
+
+// Use appends middleware to the worker's middleware chain.
+// Middleware wraps each execution cycle. For periodic workers (Every),
+// middleware runs on every tick, not once for the worker lifetime.
+// Worker-level middleware runs inside (closer to the function) run-level
+// middleware set via WithMiddleware.
+//
+// The first middleware in the list is the outermost wrapper (runs first
+// on entry, last on exit), matching the convention of gRPC interceptors.
+func (w *Worker) Use(mw ...Middleware) *Worker {
+	w.middlewares = append(w.middlewares, mw...)
 	return w
 }
 

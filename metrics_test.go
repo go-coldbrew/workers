@@ -13,14 +13,14 @@ import (
 
 // mockMetrics records all metric calls for assertions.
 type mockMetrics struct {
-	mu           sync.Mutex
-	started      []string
-	stopped      []string
-	panicked     []string
-	failed       []string
-	restarted    []string
-	durations    map[string]time.Duration
-	activeCount  int
+	mu          sync.Mutex
+	started     []string
+	stopped     []string
+	panicked    []string
+	failed      []string
+	restarted   []string
+	durations   map[string]time.Duration
+	activeCount int
 }
 
 func newMockMetrics() *mockMetrics {

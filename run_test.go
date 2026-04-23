@@ -146,3 +146,70 @@ func TestRunWorker_Single(t *testing.T) {
 	RunWorker(ctx, w)
 	assert.True(t, started.Load())
 }
+
+func TestRun_WithJitter(t *testing.T) {
+	var count atomic.Int32
+	w := NewWorker("jittered", func(ctx WorkerContext) error {
+		count.Add(1)
+		return nil
+	}).Every(10 * time.Millisecond).WithJitter(50)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, []*Worker{w})
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, int(count.Load()), 3, "jittered worker should tick multiple times")
+}
+
+func TestRun_WithDefaultJitter(t *testing.T) {
+	var count atomic.Int32
+	w := NewWorker("default-jitter", func(ctx WorkerContext) error {
+		count.Add(1)
+		return nil
+	}).Every(10 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, []*Worker{w}, WithDefaultJitter(50))
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, int(count.Load()), 3, "default jitter worker should tick multiple times")
+}
+
+func TestRun_WorkerJitterOverridesDefault(t *testing.T) {
+	// Worker-level jitter=0 should override run-level default and produce
+	// exact intervals (no jitter).
+	var count atomic.Int32
+	w := NewWorker("no-jitter", func(ctx WorkerContext) error {
+		count.Add(1)
+		return nil
+	}).Every(10 * time.Millisecond).WithJitter(0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, []*Worker{w}, WithDefaultJitter(50))
+	assert.NoError(t, err)
+	// With 0% jitter on 10ms interval in 55ms: should tick at least 3 times.
+	assert.GreaterOrEqual(t, int(count.Load()), 3)
+}
+
+func TestRun_WithInitialDelay(t *testing.T) {
+	start := time.Now()
+	var firstTick atomic.Int64
+
+	w := NewWorker("delayed", func(ctx WorkerContext) error {
+		firstTick.CompareAndSwap(0, time.Since(start).Nanoseconds())
+		return nil
+	}).Every(10 * time.Millisecond).WithInitialDelay(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, []*Worker{w})
+	assert.NoError(t, err)
+
+	delay := time.Duration(firstTick.Load())
+	assert.GreaterOrEqual(t, delay, 40*time.Millisecond, "first tick should be delayed")
+}

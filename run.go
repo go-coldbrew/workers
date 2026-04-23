@@ -15,7 +15,9 @@ import (
 type RunOption func(*runConfig)
 
 type runConfig struct {
-	metrics Metrics
+	metrics       Metrics
+	defaultJitter *int
+	middleware    []Middleware
 }
 
 // WithMetrics sets the metrics implementation for all workers started by Run.
@@ -29,12 +31,32 @@ func WithMetrics(m Metrics) RunOption {
 	}
 }
 
+// WithDefaultJitter sets the default jitter percentage for all periodic workers
+// started by Run. Workers that call WithJitter override this value.
+// Has no effect on non-periodic workers.
+func WithDefaultJitter(percent int) RunOption {
+	return func(c *runConfig) {
+		c.defaultJitter = &percent
+	}
+}
+
+// WithMiddleware sets run-level middleware applied to all workers.
+// Run-level middleware wraps outside worker-level middleware (set via Use),
+// so run-level concerns like tracing are always outermost.
+func WithMiddleware(mw ...Middleware) RunOption {
+	return func(c *runConfig) {
+		c.middleware = append(c.middleware, mw...)
+	}
+}
+
 // workerRunService wraps the actual Run func as a suture.Service
 // that runs inside the worker's own child supervisor.
 type workerRunService struct {
 	w        *Worker
+	chain    CycleHandler              // middleware chain (RunCycle per tick, Close on stop)
+	runFn    func(WorkerContext) error // interval loop wrapping chain.RunCycle
 	childSup *suture.Supervisor
-	metrics  Metrics
+	cfg      *runConfig
 	active   *atomic.Int32
 	mu       sync.Mutex
 	attempt  int
@@ -47,17 +69,15 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	ws.attempt++
 	ws.mu.Unlock()
 
-	m := ws.metrics
+	m := ws.cfg.metrics
 
 	m.WorkerStarted(ws.w.name)
-	ws.active.Add(1)
-	m.SetActiveWorkers(int(ws.active.Load()))
+	m.SetActiveWorkers(int(ws.active.Add(1)))
 
 	start := time.Now()
 	defer func() {
 		m.WorkerStopped(ws.w.name)
-		ws.active.Add(-1)
-		m.SetActiveWorkers(int(ws.active.Load()))
+		m.SetActiveWorkers(int(ws.active.Add(-1)))
 		m.ObserveRunDuration(ws.w.name, time.Since(start))
 	}()
 
@@ -73,8 +93,14 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	ctx = log.AddToContext(ctx, "worker", ws.w.name)
 	ctx = log.AddToContext(ctx, "attempt", attempt)
 
-	wctx := newWorkerContext(ctx, ws.w.name, attempt, ws.childSup, m, ws.active)
-	err := ws.w.run(wctx)
+	// Inject WorkerInfo into context for deep callstacks (convenience).
+	ctx = WithWorkerInfo(ctx, WorkerInfo{Name: ws.w.name, Attempt: attempt})
+
+	// Close the middleware chain when the worker stops (flush, release).
+	defer ws.chain.Close()
+
+	wctx := newWorkerContext(ctx, ws.w.name, attempt, ws.childSup, ws.cfg, ws.active)
+	err := ws.runFn(wctx)
 
 	if err != nil && ctx.Err() == nil {
 		m.WorkerFailed(ws.w.name, err)
@@ -102,13 +128,61 @@ func resolveMetrics(w *Worker, parent Metrics) Metrics {
 	return BaseMetrics{}
 }
 
+// resolveJitter returns the effective jitter percentage for a worker.
+// Worker-level WithJitter takes precedence over run-level WithDefaultJitter.
+func resolveJitter(w *Worker, cfg *runConfig) int {
+	if w.jitterPercent != nil {
+		return *w.jitterPercent
+	}
+	if cfg != nil && cfg.defaultJitter != nil {
+		return *cfg.defaultJitter
+	}
+	return 0
+}
+
 // addWorkerToSupervisor creates a child supervisor for the worker,
 // adds the worker's run func as a service inside it, and adds the
 // child supervisor to the parent. Returns the service token for removal.
-func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, metrics Metrics, active *atomic.Int32) suture.ServiceToken {
-	m := resolveMetrics(w, metrics)
+func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32) suture.ServiceToken {
+	m := resolveMetrics(w, cfg.metrics)
+
+	// Build a runConfig scoped to this worker (inherits run-level settings,
+	// overrides metrics if the worker has its own).
+	workerCfg := &runConfig{
+		metrics:       m,
+		defaultJitter: cfg.defaultJitter,
+		middleware:    cfg.middleware,
+	}
+
+	// Build middleware chain wrapping the original run function.
+	chain := buildChain(cfg.middleware, w.middlewares, w.run)
+
+	// Build the per-tick function that the interval loop calls.
+	// This bridges from WorkerContext (used by the interval loop) to
+	// CycleHandler.RunCycle (used by middleware), threading WorkerContext
+	// through a context value for the innermost adapter.
+	info := &WorkerInfo{Name: w.name}
+	tickFn := func(wctx WorkerContext) error {
+		ctx := context.WithValue(wctx, wctxKey{}, wctx)
+		info.Attempt = wctx.Attempt()
+		return chain.RunCycle(ctx, info)
+	}
+
+	// Wrap with Every if interval is set.
+	var runFn func(WorkerContext) error
+	if w.interval > 0 {
+		jitter := resolveJitter(w, cfg)
+		if jitter > 0 {
+			runFn = everyIntervalWithJitter(w.interval, jitter, w.initialDelay, tickFn)
+		} else {
+			runFn = everyIntervalWithDelay(w.interval, w.initialDelay, tickFn)
+		}
+	} else {
+		runFn = tickFn
+	}
+
 	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
-	childSup.Add(&workerRunService{w: w, childSup: childSup, metrics: m, active: active})
+	childSup.Add(&workerRunService{w: w, chain: chain, runFn: runFn, childSup: childSup, cfg: workerCfg, active: active})
 	return parent.Add(childSup)
 }
 
@@ -129,7 +203,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 		EventHook: makeEventHook(cfg.metrics),
 	})
 	for _, w := range workers {
-		addWorkerToSupervisor(root, w, cfg.metrics, active)
+		addWorkerToSupervisor(root, w, cfg, active)
 	}
 	err := root.Serve(ctx)
 	if err != nil && ctx.Err() != nil {
