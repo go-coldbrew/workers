@@ -111,7 +111,9 @@ func BatchChannelWorker[T any](ch <-chan T, maxSize int, maxDelay time.Duration,
 			case item, ok := <-ch:
 				if !ok {
 					// Channel closed — flush remaining and stop permanently.
-					_ = flush()
+					if err := flush(); err != nil {
+						return err
+					}
 					return ErrDoNotRestart
 				}
 				if len(batch) == 0 {
