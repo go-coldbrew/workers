@@ -149,13 +149,16 @@ func (info *WorkerInfo) Children() []string {
 	return names
 }
 
-// Child returns the Worker for a running child, or nil if not found.
+// Child returns a snapshot of a running child worker, or nil if not found.
+// The returned copy is safe for inspection but mutations have no effect
+// on the running worker.
 func (info *WorkerInfo) Child(name string) *Worker {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
 	if entry, ok := info.children[name]; ok {
-		return entry.worker
+		cp := *entry.worker
+		return &cp
 	}
 	return nil
 }
