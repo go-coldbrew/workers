@@ -149,18 +149,17 @@ func (info *WorkerInfo) Children() []string {
 	return names
 }
 
-// Child returns a snapshot of a running child worker, or nil if not found.
-// The returned copy is safe for inspection but mutations have no effect
-// on the running worker.
-func (info *WorkerInfo) Child(name string) *Worker {
+// Child returns a copy of a running child worker and true, or the zero
+// value and false if not found. The returned value is a snapshot —
+// mutations have no effect on the running worker.
+func (info *WorkerInfo) Child(name string) (Worker, bool) {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
 	if entry, ok := info.children[name]; ok {
-		cp := *entry.worker
-		return &cp
+		return *entry.worker, true
 	}
-	return nil
+	return Worker{}, false
 }
 
 // CycleHandler handles worker execution cycles.
