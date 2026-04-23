@@ -60,15 +60,15 @@ func DistributedLock(locker Locker, opts ...LockOption) workers.Middleware {
 	}
 
 	return func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) (retErr error) {
-		key := cfg.keyFunc(info.Name())
-		ttl := cfg.ttlFunc(info.Name())
+		key := cfg.keyFunc(info.GetName())
+		ttl := cfg.ttlFunc(info.GetName())
 
 		acquired, err := locker.Acquire(ctx, key, ttl)
 		if err != nil {
 			return err
 		}
 		if !acquired {
-			return cfg.onNotAcquired(ctx, info.Name())
+			return cfg.onNotAcquired(ctx, info.GetName())
 		}
 		defer func() {
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ttl)

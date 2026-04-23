@@ -14,7 +14,7 @@ func Recover(onPanic func(name string, v any)) workers.Middleware {
 	return func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) (retErr error) {
 		defer func() {
 			if v := recover(); v != nil {
-				retErr = fmt.Errorf("panic in worker %s: %v", info.Name(), v)
+				retErr = fmt.Errorf("panic in worker %s: %v", info.GetName(), v)
 				if onPanic != nil {
 					func() {
 						defer func() {
@@ -22,7 +22,7 @@ func Recover(onPanic func(name string, v any)) workers.Middleware {
 								retErr = fmt.Errorf("%w; onPanic callback panicked: %v", retErr, hookPanic)
 							}
 						}()
-						onPanic(info.Name(), v)
+						onPanic(info.GetName(), v)
 					}()
 				}
 			}

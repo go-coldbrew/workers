@@ -11,7 +11,7 @@ import (
 // The span is named "worker:<name>:cycle" and records errors.
 func Tracing() workers.Middleware {
 	return func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
-		span, ctx := tracing.NewInternalSpan(ctx, "worker:"+info.Name()+":cycle")
+		span, ctx := tracing.NewInternalSpan(ctx, "worker:"+info.GetName()+":cycle")
 		defer span.Finish()
 		err := next(ctx, info)
 		if err != nil {

@@ -85,11 +85,11 @@ type childEntry struct {
 	worker *Worker
 }
 
-// Name returns the worker's name as passed to [NewWorker].
-func (info *WorkerInfo) Name() string { return info.name }
+// GetName returns the worker's name as passed to [NewWorker].
+func (info *WorkerInfo) GetName() string { return info.name }
 
-// Attempt returns the restart attempt number (0 on first run).
-func (info *WorkerInfo) Attempt() int { return info.attempt }
+// GetAttempt returns the restart attempt number (0 on first run).
+func (info *WorkerInfo) GetAttempt() int { return info.attempt }
 
 // NewWorkerInfo creates a [WorkerInfo] with the given name and attempt.
 // This is useful for testing middleware — the framework creates fully
@@ -137,8 +137,8 @@ func (info *WorkerInfo) removeLocked(name string) {
 	}
 }
 
-// Children returns the names of currently running child workers.
-func (info *WorkerInfo) Children() []string {
+// GetChildren returns the names of currently running child workers.
+func (info *WorkerInfo) GetChildren() []string {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
@@ -150,10 +150,10 @@ func (info *WorkerInfo) Children() []string {
 	return names
 }
 
-// Child returns a copy of a running child worker and true, or the zero
+// GetChild returns a copy of a running child worker and true, or the zero
 // value and false if not found. The returned value is a snapshot —
 // mutations have no effect on the running worker.
-func (info *WorkerInfo) Child(name string) (Worker, bool) {
+func (info *WorkerInfo) GetChild(name string) (Worker, bool) {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
@@ -208,8 +208,8 @@ func NewWorker(name string) *Worker {
 	return &Worker{name: name, jitterPercent: -1, restartOnFail: true}
 }
 
-// Name returns the worker's name.
-func (w *Worker) Name() string { return w.name }
+// GetName returns the worker's name.
+func (w *Worker) GetName() string { return w.name }
 
 // GetHandler returns the worker's [CycleHandler], or nil if not set.
 func (w *Worker) GetHandler() CycleHandler { return w.handler }

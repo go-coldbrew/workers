@@ -13,8 +13,8 @@ func TestNewWorker(t *testing.T) {
 	called := false
 	w := NewWorker("test").HandlerFunc(func(_ context.Context, info *WorkerInfo) error {
 		called = true
-		assert.Equal(t, "test", info.Name())
-		assert.Equal(t, 0, info.Attempt())
+		assert.Equal(t, "test", info.GetName())
+		assert.Equal(t, 0, info.GetAttempt())
 		return nil
 	})
 	require.NotNil(t, w)
@@ -83,13 +83,13 @@ func TestWorker_Interceptors(t *testing.T) {
 
 func TestWorkerInfo(t *testing.T) {
 	info := &WorkerInfo{name: "myworker", attempt: 3}
-	assert.Equal(t, "myworker", info.Name())
-	assert.Equal(t, 3, info.Attempt())
+	assert.Equal(t, "myworker", info.GetName())
+	assert.Equal(t, 3, info.GetAttempt())
 }
 
 func TestWorkerInfo_Children_Nil(t *testing.T) {
 	info := &WorkerInfo{name: "test"}
-	assert.Empty(t, info.Children(), "Children on nil map should return empty slice")
+	assert.Empty(t, info.GetChildren(), "Children on nil map should return empty slice")
 }
 
 func TestCycleFunc_Close(t *testing.T) {

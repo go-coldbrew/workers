@@ -11,7 +11,7 @@ import (
 // A simple worker that runs until cancelled.
 func ExampleNewWorker() {
 	w := workers.NewWorker("greeter").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
-		fmt.Printf("worker %q started (attempt %d)\n", info.Name(), info.Attempt())
+		fmt.Printf("worker %q started (attempt %d)\n", info.GetName(), info.GetAttempt())
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -201,24 +201,24 @@ func ExampleWorkerInfo_Add() {
 	manager := workers.NewWorker("manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
 		// Spawn two child workers dynamically.
 		info.Add(workers.NewWorker("child-a").HandlerFunc(func(ctx context.Context, childInfo *workers.WorkerInfo) error {
-			fmt.Printf("%s started\n", childInfo.Name())
+			fmt.Printf("%s started\n", childInfo.GetName())
 			<-ctx.Done()
 			return ctx.Err()
 		}))
 		info.Add(workers.NewWorker("child-b").HandlerFunc(func(ctx context.Context, childInfo *workers.WorkerInfo) error {
-			fmt.Printf("%s started\n", childInfo.Name())
+			fmt.Printf("%s started\n", childInfo.GetName())
 			<-ctx.Done()
 			return ctx.Err()
 		}))
 
 		// Give children time to start.
 		time.Sleep(30 * time.Millisecond)
-		fmt.Printf("children: %v\n", info.Children())
+		fmt.Printf("children: %v\n", info.GetChildren())
 
 		// Remove one child.
 		info.Remove("child-a")
 		time.Sleep(30 * time.Millisecond)
-		fmt.Printf("after remove: %v\n", info.Children())
+		fmt.Printf("after remove: %v\n", info.GetChildren())
 
 		<-ctx.Done()
 		return ctx.Err()
@@ -299,7 +299,7 @@ func Example_dynamicWorkerPool() {
 				tick++
 
 				running := map[string]bool{}
-				for _, name := range info.Children() {
+				for _, name := range info.GetChildren() {
 					running[name] = true
 				}
 
@@ -319,7 +319,7 @@ func Example_dynamicWorkerPool() {
 					}
 				}
 				time.Sleep(10 * time.Millisecond) // let children start
-				fmt.Printf("tick %d: children=%v\n", tick, info.Children())
+				fmt.Printf("tick %d: children=%v\n", tick, info.GetChildren())
 			}
 		}
 	})
@@ -339,15 +339,15 @@ func Example_dynamicWorkerPool() {
 // Per-worker middleware using the interceptor pattern.
 func ExampleWorker_Interceptors() {
 	loggingMW := func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
-		fmt.Printf("[%s] cycle start\n", info.Name())
+		fmt.Printf("[%s] cycle start\n", info.GetName())
 		err := next(ctx, info)
-		fmt.Printf("[%s] cycle end\n", info.Name())
+		fmt.Printf("[%s] cycle end\n", info.GetName())
 		return err
 	}
 
 	w := workers.NewWorker("with-logging").
 		HandlerFunc(func(_ context.Context, info *workers.WorkerInfo) error {
-			fmt.Printf("[%s] doing work\n", info.Name())
+			fmt.Printf("[%s] doing work\n", info.GetName())
 			return nil
 		}).
 		Every(20 * time.Millisecond).

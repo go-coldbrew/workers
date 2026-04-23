@@ -118,7 +118,7 @@ func main() {
 				tick++
 
 				running := map[string]bool{}
-				for _, name := range info.Children() {
+				for _, name := range info.GetChildren() {
 					running[name] = true
 				}
 
@@ -138,7 +138,7 @@ func main() {
 					}
 				}
 				time.Sleep(10 * time.Millisecond) // let children start
-				fmt.Printf("tick %d: children=%v\n", tick, info.Children())
+				fmt.Printf("tick %d: children=%v\n", tick, info.GetChildren())
 			}
 		}
 	})
@@ -239,10 +239,10 @@ shutdown complete
   - [func \(w \*Worker\) AddInterceptors\(mw ...Middleware\) \*Worker](<#Worker.AddInterceptors>)
   - [func \(w \*Worker\) Every\(d time.Duration\) \*Worker](<#Worker.Every>)
   - [func \(w \*Worker\) GetHandler\(\) CycleHandler](<#Worker.GetHandler>)
+  - [func \(w \*Worker\) GetName\(\) string](<#Worker.GetName>)
   - [func \(w \*Worker\) Handler\(h CycleHandler\) \*Worker](<#Worker.Handler>)
   - [func \(w \*Worker\) HandlerFunc\(fn CycleFunc\) \*Worker](<#Worker.HandlerFunc>)
   - [func \(w \*Worker\) Interceptors\(mw ...Middleware\) \*Worker](<#Worker.Interceptors>)
-  - [func \(w \*Worker\) Name\(\) string](<#Worker.Name>)
   - [func \(w \*Worker\) WithBackoffJitter\(jitter suture.Jitter\) \*Worker](<#Worker.WithBackoffJitter>)
   - [func \(w \*Worker\) WithFailureBackoff\(d time.Duration\) \*Worker](<#Worker.WithFailureBackoff>)
   - [func \(w \*Worker\) WithFailureDecay\(decay float64\) \*Worker](<#Worker.WithFailureDecay>)
@@ -255,10 +255,10 @@ shutdown complete
 - [type WorkerInfo](<#WorkerInfo>)
   - [func NewWorkerInfo\(name string, attempt int\) \*WorkerInfo](<#NewWorkerInfo>)
   - [func \(info \*WorkerInfo\) Add\(w \*Worker\)](<#WorkerInfo.Add>)
-  - [func \(info \*WorkerInfo\) Attempt\(\) int](<#WorkerInfo.Attempt>)
-  - [func \(info \*WorkerInfo\) Child\(name string\) \(Worker, bool\)](<#WorkerInfo.Child>)
-  - [func \(info \*WorkerInfo\) Children\(\) \[\]string](<#WorkerInfo.Children>)
-  - [func \(info \*WorkerInfo\) Name\(\) string](<#WorkerInfo.Name>)
+  - [func \(info \*WorkerInfo\) GetAttempt\(\) int](<#WorkerInfo.GetAttempt>)
+  - [func \(info \*WorkerInfo\) GetChild\(name string\) \(Worker, bool\)](<#WorkerInfo.GetChild>)
+  - [func \(info \*WorkerInfo\) GetChildren\(\) \[\]string](<#WorkerInfo.GetChildren>)
+  - [func \(info \*WorkerInfo\) GetName\(\) string](<#WorkerInfo.GetName>)
   - [func \(info \*WorkerInfo\) Remove\(name string\)](<#WorkerInfo.Remove>)
 
 
@@ -782,7 +782,7 @@ import (
 
 func main() {
 	w := workers.NewWorker("greeter").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
-		fmt.Printf("worker %q started (attempt %d)\n", info.Name(), info.Attempt())
+		fmt.Printf("worker %q started (attempt %d)\n", info.GetName(), info.GetAttempt())
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -871,6 +871,15 @@ func (w *Worker) GetHandler() CycleHandler
 
 GetHandler returns the worker's [CycleHandler](<#CycleHandler>), or nil if not set.
 
+<a name="Worker.GetName"></a>
+### func \(\*Worker\) [GetName](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L212>)
+
+```go
+func (w *Worker) GetName() string
+```
+
+GetName returns the worker's name.
+
 <a name="Worker.Handler"></a>
 ### func \(\*Worker\) [Handler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L219>)
 
@@ -916,15 +925,15 @@ import (
 
 func main() {
 	loggingMW := func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
-		fmt.Printf("[%s] cycle start\n", info.Name())
+		fmt.Printf("[%s] cycle start\n", info.GetName())
 		err := next(ctx, info)
-		fmt.Printf("[%s] cycle end\n", info.Name())
+		fmt.Printf("[%s] cycle end\n", info.GetName())
 		return err
 	}
 
 	w := workers.NewWorker("with-logging").
 		HandlerFunc(func(_ context.Context, info *workers.WorkerInfo) error {
-			fmt.Printf("[%s] doing work\n", info.Name())
+			fmt.Printf("[%s] doing work\n", info.GetName())
 			return nil
 		}).
 		Every(20 * time.Millisecond).
@@ -947,15 +956,6 @@ func main() {
 
 </p>
 </details>
-
-<a name="Worker.Name"></a>
-### func \(\*Worker\) [Name](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L212>)
-
-```go
-func (w *Worker) Name() string
-```
-
-Name returns the worker's name.
 
 <a name="Worker.WithBackoffJitter"></a>
 ### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L297>)
@@ -1127,24 +1127,24 @@ func main() {
 	manager := workers.NewWorker("manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
 		// Spawn two child workers dynamically.
 		info.Add(workers.NewWorker("child-a").HandlerFunc(func(ctx context.Context, childInfo *workers.WorkerInfo) error {
-			fmt.Printf("%s started\n", childInfo.Name())
+			fmt.Printf("%s started\n", childInfo.GetName())
 			<-ctx.Done()
 			return ctx.Err()
 		}))
 		info.Add(workers.NewWorker("child-b").HandlerFunc(func(ctx context.Context, childInfo *workers.WorkerInfo) error {
-			fmt.Printf("%s started\n", childInfo.Name())
+			fmt.Printf("%s started\n", childInfo.GetName())
 			<-ctx.Done()
 			return ctx.Err()
 		}))
 
 		// Give children time to start.
 		time.Sleep(30 * time.Millisecond)
-		fmt.Printf("children: %v\n", info.Children())
+		fmt.Printf("children: %v\n", info.GetChildren())
 
 		// Remove one child.
 		info.Remove("child-a")
 		time.Sleep(30 * time.Millisecond)
-		fmt.Printf("after remove: %v\n", info.Children())
+		fmt.Printf("after remove: %v\n", info.GetChildren())
 
 		<-ctx.Done()
 		return ctx.Err()
@@ -1223,41 +1223,41 @@ processor v2
 </p>
 </details>
 
-<a name="WorkerInfo.Attempt"></a>
-### func \(\*WorkerInfo\) [Attempt](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L92>)
+<a name="WorkerInfo.GetAttempt"></a>
+### func \(\*WorkerInfo\) [GetAttempt](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L92>)
 
 ```go
-func (info *WorkerInfo) Attempt() int
+func (info *WorkerInfo) GetAttempt() int
 ```
 
-Attempt returns the restart attempt number \(0 on first run\).
+GetAttempt returns the restart attempt number \(0 on first run\).
 
-<a name="WorkerInfo.Child"></a>
-### func \(\*WorkerInfo\) [Child](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L156>)
+<a name="WorkerInfo.GetChild"></a>
+### func \(\*WorkerInfo\) [GetChild](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L156>)
 
 ```go
-func (info *WorkerInfo) Child(name string) (Worker, bool)
+func (info *WorkerInfo) GetChild(name string) (Worker, bool)
 ```
 
-Child returns a copy of a running child worker and true, or the zero value and false if not found. The returned value is a snapshot — mutations have no effect on the running worker.
+GetChild returns a copy of a running child worker and true, or the zero value and false if not found. The returned value is a snapshot — mutations have no effect on the running worker.
 
-<a name="WorkerInfo.Children"></a>
-### func \(\*WorkerInfo\) [Children](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L141>)
+<a name="WorkerInfo.GetChildren"></a>
+### func \(\*WorkerInfo\) [GetChildren](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L141>)
 
 ```go
-func (info *WorkerInfo) Children() []string
+func (info *WorkerInfo) GetChildren() []string
 ```
 
-Children returns the names of currently running child workers.
+GetChildren returns the names of currently running child workers.
 
-<a name="WorkerInfo.Name"></a>
-### func \(\*WorkerInfo\) [Name](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L89>)
+<a name="WorkerInfo.GetName"></a>
+### func \(\*WorkerInfo\) [GetName](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L89>)
 
 ```go
-func (info *WorkerInfo) Name() string
+func (info *WorkerInfo) GetName() string
 ```
 
-Name returns the worker's name as passed to [NewWorker](<#NewWorker>).
+GetName returns the worker's name as passed to [NewWorker](<#NewWorker>).
 
 <a name="WorkerInfo.Remove"></a>
 ### func \(\*WorkerInfo\) [Remove](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L122>)

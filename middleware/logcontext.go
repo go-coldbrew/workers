@@ -11,8 +11,8 @@ import (
 // log calls inside the worker automatically include them.
 func LogContext() workers.Middleware {
 	return func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
-		ctx = log.AddToContext(ctx, "worker", info.Name())
-		ctx = log.AddToContext(ctx, "attempt", info.Attempt())
+		ctx = log.AddToContext(ctx, "worker", info.GetName())
+		ctx = log.AddToContext(ctx, "attempt", info.GetAttempt())
 		return next(ctx, info)
 	}
 }

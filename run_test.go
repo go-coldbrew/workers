@@ -116,7 +116,7 @@ func TestRun_WrappedErrDoNotRestart(t *testing.T) {
 func TestRun_WorkerInfoName(t *testing.T) {
 	var gotName string
 	w := NewWorker("named-worker").HandlerFunc(func(_ context.Context, info *WorkerInfo) error {
-		gotName = info.Name()
+		gotName = info.GetName()
 		return nil
 	}).WithRestart(false)
 
@@ -132,7 +132,7 @@ func TestRun_WorkerInfoAttempt(t *testing.T) {
 	var attempts []int
 	w := NewWorker("attempt-tracker").HandlerFunc(func(ctx context.Context, info *WorkerInfo) error {
 		mu.Lock()
-		attempts = append(attempts, info.Attempt())
+		attempts = append(attempts, info.GetAttempt())
 		mu.Unlock()
 		if len(attempts) < 3 {
 			return errors.New("fail")
