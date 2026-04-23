@@ -262,7 +262,7 @@ shutdown complete
 
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L219>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L222>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -318,7 +318,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L242>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L245>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
@@ -368,7 +368,7 @@ done
 </details>
 
 <a name="BaseMetrics"></a>
-## type [BaseMetrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L43>)
+## type [BaseMetrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L46>)
 
 BaseMetrics provides no\-op implementations of all Metrics methods. Embed it in custom Metrics implementations so that new methods added to the Metrics interface in future versions get safe no\-op defaults instead of breaking your build:
 
@@ -388,7 +388,7 @@ type BaseMetrics struct{}
 ```
 
 <a name="BaseMetrics.ObserveRunDuration"></a>
-### func \(BaseMetrics\) [ObserveRunDuration](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L50>)
+### func \(BaseMetrics\) [ObserveRunDuration](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L53>)
 
 ```go
 func (BaseMetrics) ObserveRunDuration(string, time.Duration)
@@ -397,7 +397,7 @@ func (BaseMetrics) ObserveRunDuration(string, time.Duration)
 
 
 <a name="BaseMetrics.SetActiveWorkers"></a>
-### func \(BaseMetrics\) [SetActiveWorkers](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L51>)
+### func \(BaseMetrics\) [SetActiveWorkers](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L54>)
 
 ```go
 func (BaseMetrics) SetActiveWorkers(int)
@@ -406,7 +406,7 @@ func (BaseMetrics) SetActiveWorkers(int)
 
 
 <a name="BaseMetrics.WorkerFailed"></a>
-### func \(BaseMetrics\) [WorkerFailed](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L48>)
+### func \(BaseMetrics\) [WorkerFailed](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L51>)
 
 ```go
 func (BaseMetrics) WorkerFailed(string, error)
@@ -415,7 +415,7 @@ func (BaseMetrics) WorkerFailed(string, error)
 
 
 <a name="BaseMetrics.WorkerPanicked"></a>
-### func \(BaseMetrics\) [WorkerPanicked](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L47>)
+### func \(BaseMetrics\) [WorkerPanicked](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L50>)
 
 ```go
 func (BaseMetrics) WorkerPanicked(string)
@@ -424,7 +424,7 @@ func (BaseMetrics) WorkerPanicked(string)
 
 
 <a name="BaseMetrics.WorkerRestarted"></a>
-### func \(BaseMetrics\) [WorkerRestarted](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L49>)
+### func \(BaseMetrics\) [WorkerRestarted](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L52>)
 
 ```go
 func (BaseMetrics) WorkerRestarted(string, int)
@@ -433,7 +433,7 @@ func (BaseMetrics) WorkerRestarted(string, int)
 
 
 <a name="BaseMetrics.WorkerStarted"></a>
-### func \(BaseMetrics\) [WorkerStarted](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L45>)
+### func \(BaseMetrics\) [WorkerStarted](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L48>)
 
 ```go
 func (BaseMetrics) WorkerStarted(string)
@@ -442,7 +442,7 @@ func (BaseMetrics) WorkerStarted(string)
 
 
 <a name="BaseMetrics.WorkerStopped"></a>
-### func \(BaseMetrics\) [WorkerStopped](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L46>)
+### func \(BaseMetrics\) [WorkerStopped](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L49>)
 
 ```go
 func (BaseMetrics) WorkerStopped(string)
@@ -653,7 +653,7 @@ type CycleHandler interface {
 ```
 
 <a name="Metrics"></a>
-## type [Metrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L20-L28>)
+## type [Metrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L20-L31>)
 
 Metrics collects worker lifecycle metrics. Implement this interface to provide custom metrics \(e.g., Datadog, StatsD\). Use BaseMetrics\{\} to disable metrics, or NewPrometheusMetrics for the built\-in Prometheus implementation.
 
@@ -664,13 +664,16 @@ type Metrics interface {
     WorkerPanicked(name string)
     WorkerFailed(name string, err error)
     WorkerRestarted(name string, attempt int)
+    // ObserveRunDuration records the attempt lifetime — the duration from
+    // when the worker started to when it stopped or failed. For per-cycle
+    // timing, use middleware.Duration instead.
     ObserveRunDuration(name string, duration time.Duration)
     SetActiveWorkers(count int)
 }
 ```
 
 <a name="NewPrometheusMetrics"></a>
-### func [NewPrometheusMetrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L71>)
+### func [NewPrometheusMetrics](<https://github.com/go-coldbrew/workers/blob/main/metrics.go#L74>)
 
 ```go
 func NewPrometheusMetrics(namespace string) Metrics
@@ -688,7 +691,7 @@ type Middleware func(ctx context.Context, info *WorkerInfo, next CycleFunc) erro
 ```
 
 <a name="RunOption"></a>
-## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L12>)
+## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L13>)
 
 RunOption configures the behavior of [Run](<#Run>).
 
@@ -697,7 +700,7 @@ type RunOption func(*runConfig)
 ```
 
 <a name="AddInterceptors"></a>
-### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L40>)
+### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L41>)
 
 ```go
 func AddInterceptors(mw ...Middleware) RunOption
@@ -706,7 +709,7 @@ func AddInterceptors(mw ...Middleware) RunOption
 AddInterceptors appends to the run\-level interceptor list.
 
 <a name="WithDefaultJitter"></a>
-### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L50>)
+### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L51>)
 
 ```go
 func WithDefaultJitter(percent int) RunOption
@@ -715,7 +718,7 @@ func WithDefaultJitter(percent int) RunOption
 WithDefaultJitter sets a run\-level default jitter percentage for all periodic workers. Worker\-level [Worker.WithJitter](<#Worker.WithJitter>) takes precedence. Setting Worker.WithJitter\(0\) disables jitter for a specific worker even when a run\-level default is set.
 
 <a name="WithInterceptors"></a>
-### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L33>)
+### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L34>)
 
 ```go
 func WithInterceptors(mw ...Middleware) RunOption
@@ -724,7 +727,7 @@ func WithInterceptors(mw ...Middleware) RunOption
 WithInterceptors replaces the run\-level interceptor list. Run\-level interceptors wrap outside worker\-level interceptors.
 
 <a name="WithMetrics"></a>
-### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L23>)
+### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L24>)
 
 ```go
 func WithMetrics(m Metrics) RunOption
