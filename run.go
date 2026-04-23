@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -85,6 +86,7 @@ type workerRunService struct {
 	active   *atomic.Int32
 	cfg      *runConfig
 	attempt  atomic.Int32
+	wg       *sync.WaitGroup // shared with closerService to sequence Close after RunCycle
 }
 
 // closerService calls handler.Close() exactly once when the worker's
@@ -92,10 +94,12 @@ type workerRunService struct {
 // context cancellation (permanent shutdown) triggers Close.
 type closerService struct {
 	handler CycleHandler
+	wg      *sync.WaitGroup // wait for active RunCycle to finish before Close
 }
 
 func (c *closerService) Serve(ctx context.Context) error {
 	<-ctx.Done()
+	c.wg.Wait() // wait for RunCycle to finish, preventing Close/RunCycle race
 	if c.handler != nil {
 		if err := c.handler.Close(); err != nil {
 			slog.Error("worker handler close failed", "error", err)
@@ -108,6 +112,9 @@ func (c *closerService) String() string { return "closer" }
 
 // Serve implements suture.Service.
 func (ws *workerRunService) Serve(ctx context.Context) error {
+	ws.wg.Add(1)
+	defer ws.wg.Done()
+
 	attempt := int(ws.attempt.Add(1) - 1)
 
 	m := ws.metrics
@@ -216,12 +223,13 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig,
 		runFn = everyIntervalWithJitter(w.interval, jitter, w.initialDelay, runFn)
 	}
 
+	var wg sync.WaitGroup
 	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
 	childSup.Add(&workerRunService{
 		w: w, runFn: runFn,
-		childSup: childSup, metrics: m, active: active, cfg: cfg,
+		childSup: childSup, metrics: m, active: active, cfg: cfg, wg: &wg,
 	})
-	childSup.Add(&closerService{handler: handler})
+	childSup.Add(&closerService{handler: handler, wg: &wg})
 	return parent.Add(childSup)
 }
 

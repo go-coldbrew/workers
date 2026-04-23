@@ -271,7 +271,7 @@ var ErrDoNotRestart = suture.ErrDoNotRestart
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L233>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L241>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -327,7 +327,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L256>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L264>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
@@ -591,7 +591,7 @@ EveryInterval wraps fn in a timer loop that calls fn at the given interval. Retu
 <details><summary>Example</summary>
 <p>
 
-EveryInterval wraps a function in a ticker loop.
+EveryInterval wraps a function in a timer loop.
 
 ```go
 package main
@@ -700,7 +700,7 @@ type Middleware func(ctx context.Context, info *WorkerInfo, next CycleFunc) erro
 ```
 
 <a name="RunOption"></a>
-## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L19>)
+## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L20>)
 
 RunOption configures the behavior of [Run](<#Run>).
 
@@ -709,7 +709,7 @@ type RunOption func(*runConfig)
 ```
 
 <a name="AddInterceptors"></a>
-### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L47>)
+### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L48>)
 
 ```go
 func AddInterceptors(mw ...Middleware) RunOption
@@ -718,7 +718,7 @@ func AddInterceptors(mw ...Middleware) RunOption
 AddInterceptors appends to the run\-level interceptor list.
 
 <a name="WithDefaultJitter"></a>
-### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L57>)
+### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L58>)
 
 ```go
 func WithDefaultJitter(percent int) RunOption
@@ -727,7 +727,7 @@ func WithDefaultJitter(percent int) RunOption
 WithDefaultJitter sets a run\-level default jitter percentage for all periodic workers. Worker\-level [Worker.WithJitter](<#Worker.WithJitter>) takes precedence. Setting Worker.WithJitter\(0\) disables jitter for a specific worker even when a run\-level default is set.
 
 <a name="WithInterceptors"></a>
-### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L40>)
+### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L41>)
 
 ```go
 func WithInterceptors(mw ...Middleware) RunOption
@@ -736,7 +736,7 @@ func WithInterceptors(mw ...Middleware) RunOption
 WithInterceptors replaces the run\-level interceptor list. Run\-level interceptors wrap outside worker\-level interceptors.
 
 <a name="WithMetrics"></a>
-### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L30>)
+### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L31>)
 
 ```go
 func WithMetrics(m Metrics) RunOption

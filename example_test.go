@@ -107,7 +107,7 @@ func ExampleRunWorker() {
 	// done
 }
 
-// EveryInterval wraps a function in a ticker loop.
+// EveryInterval wraps a function in a timer loop.
 func ExampleEveryInterval() {
 	count := 0
 	fn := workers.EveryInterval(20*time.Millisecond, func(_ context.Context, _ *workers.WorkerInfo) error {
