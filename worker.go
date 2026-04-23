@@ -113,11 +113,7 @@ func (info *WorkerInfo) Add(w *Worker) {
 	if w.metrics == nil {
 		w.metrics = info.metrics
 	}
-	// Remove existing worker with the same name (replace semantics).
-	if entry, ok := info.children[w.name]; ok {
-		_ = info.sup.Remove(entry.token)
-		delete(info.children, w.name)
-	}
+	info.removeLocked(w.name)
 	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active)
 	info.children[w.name] = childEntry{token: tok, worker: w}
 }
@@ -130,6 +126,11 @@ func (info *WorkerInfo) Remove(name string) {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
+	info.removeLocked(name)
+}
+
+// removeLocked stops and deletes a child by name. Caller must hold childrenMu.
+func (info *WorkerInfo) removeLocked(name string) {
 	if entry, ok := info.children[name]; ok {
 		_ = info.sup.Remove(entry.token)
 		delete(info.children, name)
@@ -207,8 +208,8 @@ func NewWorker(name string) *Worker {
 	return &Worker{name: name, jitterPercent: -1, restartOnFail: true}
 }
 
-// GetName returns the worker's name.
-func (w *Worker) GetName() string { return w.name }
+// Name returns the worker's name.
+func (w *Worker) Name() string { return w.name }
 
 // GetHandler returns the worker's [CycleHandler], or nil if not set.
 func (w *Worker) GetHandler() CycleHandler { return w.handler }

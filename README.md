@@ -239,10 +239,10 @@ shutdown complete
   - [func \(w \*Worker\) AddInterceptors\(mw ...Middleware\) \*Worker](<#Worker.AddInterceptors>)
   - [func \(w \*Worker\) Every\(d time.Duration\) \*Worker](<#Worker.Every>)
   - [func \(w \*Worker\) GetHandler\(\) CycleHandler](<#Worker.GetHandler>)
-  - [func \(w \*Worker\) GetName\(\) string](<#Worker.GetName>)
   - [func \(w \*Worker\) Handler\(h CycleHandler\) \*Worker](<#Worker.Handler>)
   - [func \(w \*Worker\) HandlerFunc\(fn CycleFunc\) \*Worker](<#Worker.HandlerFunc>)
   - [func \(w \*Worker\) Interceptors\(mw ...Middleware\) \*Worker](<#Worker.Interceptors>)
+  - [func \(w \*Worker\) Name\(\) string](<#Worker.Name>)
   - [func \(w \*Worker\) WithBackoffJitter\(jitter suture.Jitter\) \*Worker](<#Worker.WithBackoffJitter>)
   - [func \(w \*Worker\) WithFailureBackoff\(d time.Duration\) \*Worker](<#Worker.WithFailureBackoff>)
   - [func \(w \*Worker\) WithFailureDecay\(decay float64\) \*Worker](<#Worker.WithFailureDecay>)
@@ -271,7 +271,7 @@ var ErrDoNotRestart = suture.ErrDoNotRestart
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L233>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L232>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -327,7 +327,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L256>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L255>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
@@ -460,7 +460,7 @@ func (BaseMetrics) WorkerStopped(string)
 
 
 <a name="CycleFunc"></a>
-## type [CycleFunc](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L175>)
+## type [CycleFunc](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L176>)
 
 CycleFunc adapts a plain function into a [CycleHandler](<#CycleHandler>). Close is a no\-op — use this for simple, stateless handlers.
 
@@ -632,7 +632,7 @@ tick 2
 </details>
 
 <a name="CycleFunc.Close"></a>
-### func \(CycleFunc\) [Close](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L180>)
+### func \(CycleFunc\) [Close](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L181>)
 
 ```go
 func (fn CycleFunc) Close() error
@@ -641,7 +641,7 @@ func (fn CycleFunc) Close() error
 Close is a no\-op for CycleFunc.
 
 <a name="CycleFunc.RunCycle"></a>
-### func \(CycleFunc\) [RunCycle](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L177>)
+### func \(CycleFunc\) [RunCycle](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L178>)
 
 ```go
 func (fn CycleFunc) RunCycle(ctx context.Context, info *WorkerInfo) error
@@ -650,7 +650,7 @@ func (fn CycleFunc) RunCycle(ctx context.Context, info *WorkerInfo) error
 
 
 <a name="CycleHandler"></a>
-## type [CycleHandler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L168-L171>)
+## type [CycleHandler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L169-L172>)
 
 CycleHandler handles worker execution cycles. For periodic workers, RunCycle is called once per tick. Close is called once when the worker stops, allowing cleanup of resources.
 
@@ -691,7 +691,7 @@ func NewPrometheusMetrics(namespace string) Metrics
 NewPrometheusMetrics creates a Metrics implementation backed by Prometheus. The namespace is prepended to all metric names \(e.g., "myapp" → "myapp\_worker\_started\_total"\). Metrics are auto\-registered with the default Prometheus registry. Safe to call multiple times with the same namespace — returns the cached instance. The cache is process\-global; use a small number of static namespaces \(not per\-request/tenant values\).
 
 <a name="Middleware"></a>
-## type [Middleware](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L184>)
+## type [Middleware](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L185>)
 
 Middleware intercepts each execution cycle. Call next to continue the chain. Matches gRPC interceptor convention.
 
@@ -745,7 +745,7 @@ func WithMetrics(m Metrics) RunOption
 WithMetrics sets the metrics implementation for all workers started by [Run](<#Run>). Workers inherit this unless they override via [Worker.WithMetrics](<#Worker.WithMetrics>). If not set, [BaseMetrics](<#BaseMetrics>) is used.
 
 <a name="Worker"></a>
-## type [Worker](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L188-L202>)
+## type [Worker](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L189-L203>)
 
 Worker represents a background goroutine managed by the framework. Create with [NewWorker](<#NewWorker>) and configure with builder methods.
 
@@ -756,7 +756,7 @@ type Worker struct {
 ```
 
 <a name="NewWorker"></a>
-### func [NewWorker](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L206>)
+### func [NewWorker](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L207>)
 
 ```go
 func NewWorker(name string) *Worker
@@ -804,7 +804,7 @@ worker "greeter" started (attempt 0)
 </details>
 
 <a name="Worker.AddInterceptors"></a>
-### func \(\*Worker\) [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L260>)
+### func \(\*Worker\) [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L261>)
 
 ```go
 func (w *Worker) AddInterceptors(mw ...Middleware) *Worker
@@ -813,7 +813,7 @@ func (w *Worker) AddInterceptors(mw ...Middleware) *Worker
 AddInterceptors appends to the worker\-level interceptor list.
 
 <a name="Worker.Every"></a>
-### func \(\*Worker\) [Every](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L233>)
+### func \(\*Worker\) [Every](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L234>)
 
 ```go
 func (w *Worker) Every(d time.Duration) *Worker
@@ -863,7 +863,7 @@ tick 2
 </details>
 
 <a name="Worker.GetHandler"></a>
-### func \(\*Worker\) [GetHandler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L214>)
+### func \(\*Worker\) [GetHandler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L215>)
 
 ```go
 func (w *Worker) GetHandler() CycleHandler
@@ -871,17 +871,8 @@ func (w *Worker) GetHandler() CycleHandler
 
 GetHandler returns the worker's [CycleHandler](<#CycleHandler>), or nil if not set.
 
-<a name="Worker.GetName"></a>
-### func \(\*Worker\) [GetName](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L211>)
-
-```go
-func (w *Worker) GetName() string
-```
-
-GetName returns the worker's name.
-
 <a name="Worker.Handler"></a>
-### func \(\*Worker\) [Handler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L218>)
+### func \(\*Worker\) [Handler](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L219>)
 
 ```go
 func (w *Worker) Handler(h CycleHandler) *Worker
@@ -890,7 +881,7 @@ func (w *Worker) Handler(h CycleHandler) *Worker
 Handler sets the worker's [CycleHandler](<#CycleHandler>). Use this for handlers that need cleanup via Close \(e.g., database connections, leases\).
 
 <a name="Worker.HandlerFunc"></a>
-### func \(\*Worker\) [HandlerFunc](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L225>)
+### func \(\*Worker\) [HandlerFunc](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L226>)
 
 ```go
 func (w *Worker) HandlerFunc(fn CycleFunc) *Worker
@@ -899,7 +890,7 @@ func (w *Worker) HandlerFunc(fn CycleFunc) *Worker
 HandlerFunc sets the worker's handler from a plain function. This is the common case for simple, stateless workers.
 
 <a name="Worker.Interceptors"></a>
-### func \(\*Worker\) [Interceptors](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L254>)
+### func \(\*Worker\) [Interceptors](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L255>)
 
 ```go
 func (w *Worker) Interceptors(mw ...Middleware) *Worker
@@ -957,8 +948,17 @@ func main() {
 </p>
 </details>
 
+<a name="Worker.Name"></a>
+### func \(\*Worker\) [Name](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L212>)
+
+```go
+func (w *Worker) Name() string
+```
+
+Name returns the worker's name.
+
 <a name="Worker.WithBackoffJitter"></a>
-### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L296>)
+### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L297>)
 
 ```go
 func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker
@@ -967,7 +967,7 @@ func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker
 WithBackoffJitter adds random jitter to the backoff duration to prevent thundering herd on coordinated restarts.
 
 <a name="Worker.WithFailureBackoff"></a>
-### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L289>)
+### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L290>)
 
 ```go
 func (w *Worker) WithFailureBackoff(d time.Duration) *Worker
@@ -976,7 +976,7 @@ func (w *Worker) WithFailureBackoff(d time.Duration) *Worker
 WithFailureBackoff sets the duration to wait between restarts. Suture default is 15 seconds.
 
 <a name="Worker.WithFailureDecay"></a>
-### func \(\*Worker\) [WithFailureDecay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L275>)
+### func \(\*Worker\) [WithFailureDecay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L276>)
 
 ```go
 func (w *Worker) WithFailureDecay(decay float64) *Worker
@@ -985,7 +985,7 @@ func (w *Worker) WithFailureDecay(decay float64) *Worker
 WithFailureDecay sets the rate at which failure count decays over time. A value of 1.0 means failures decay by one per second. Suture default is 1.0.
 
 <a name="Worker.WithFailureThreshold"></a>
-### func \(\*Worker\) [WithFailureThreshold](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L282>)
+### func \(\*Worker\) [WithFailureThreshold](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L283>)
 
 ```go
 func (w *Worker) WithFailureThreshold(threshold float64) *Worker
@@ -994,7 +994,7 @@ func (w *Worker) WithFailureThreshold(threshold float64) *Worker
 WithFailureThreshold sets the number of failures allowed before the supervisor gives up restarting. Suture default is 5.
 
 <a name="Worker.WithInitialDelay"></a>
-### func \(\*Worker\) [WithInitialDelay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L248>)
+### func \(\*Worker\) [WithInitialDelay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L249>)
 
 ```go
 func (w *Worker) WithInitialDelay(d time.Duration) *Worker
@@ -1003,7 +1003,7 @@ func (w *Worker) WithInitialDelay(d time.Duration) *Worker
 WithInitialDelay delays the first tick to stagger startup. Requires [Worker.Every](<#Worker.Every>).
 
 <a name="Worker.WithJitter"></a>
-### func \(\*Worker\) [WithJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L242>)
+### func \(\*Worker\) [WithJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L243>)
 
 ```go
 func (w *Worker) WithJitter(percent int) *Worker
@@ -1012,7 +1012,7 @@ func (w *Worker) WithJitter(percent int) *Worker
 WithJitter sets per\-worker jitter as a percentage of the base interval. Each tick is randomized within ±percent of the base. Requires [Worker.Every](<#Worker.Every>). Setting WithJitter\(0\) explicitly disables jitter even when a run\-level default is set via [WithDefaultJitter](<#WithDefaultJitter>).
 
 <a name="Worker.WithMetrics"></a>
-### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L310>)
+### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L311>)
 
 ```go
 func (w *Worker) WithMetrics(m Metrics) *Worker
@@ -1021,7 +1021,7 @@ func (w *Worker) WithMetrics(m Metrics) *Worker
 WithMetrics sets a per\-worker metrics implementation, overriding the metrics inherited from the parent [WorkerInfo](<#WorkerInfo>) or [Run](<#Run>) options.
 
 <a name="Worker.WithRestart"></a>
-### func \(\*Worker\) [WithRestart](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L268>)
+### func \(\*Worker\) [WithRestart](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L269>)
 
 ```go
 func (w *Worker) WithRestart(restart bool) *Worker
@@ -1070,7 +1070,7 @@ func main() {
 </details>
 
 <a name="Worker.WithTimeout"></a>
-### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L303>)
+### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L304>)
 
 ```go
 func (w *Worker) WithTimeout(d time.Duration) *Worker
@@ -1233,7 +1233,7 @@ func (info *WorkerInfo) Attempt() int
 Attempt returns the restart attempt number \(0 on first run\).
 
 <a name="WorkerInfo.Child"></a>
-### func \(\*WorkerInfo\) [Child](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L155>)
+### func \(\*WorkerInfo\) [Child](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L156>)
 
 ```go
 func (info *WorkerInfo) Child(name string) (Worker, bool)
@@ -1242,7 +1242,7 @@ func (info *WorkerInfo) Child(name string) (Worker, bool)
 Child returns a copy of a running child worker and true, or the zero value and false if not found. The returned value is a snapshot — mutations have no effect on the running worker.
 
 <a name="WorkerInfo.Children"></a>
-### func \(\*WorkerInfo\) [Children](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L140>)
+### func \(\*WorkerInfo\) [Children](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L141>)
 
 ```go
 func (info *WorkerInfo) Children() []string
@@ -1260,7 +1260,7 @@ func (info *WorkerInfo) Name() string
 Name returns the worker's name as passed to [NewWorker](<#NewWorker>).
 
 <a name="WorkerInfo.Remove"></a>
-### func \(\*WorkerInfo\) [Remove](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L126>)
+### func \(\*WorkerInfo\) [Remove](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L122>)
 
 ```go
 func (info *WorkerInfo) Remove(name string)

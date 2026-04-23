@@ -88,6 +88,7 @@ func BatchChannelWorker[T any](ch <-chan T, maxSize int, maxDelay time.Duration,
 	return func(ctx context.Context, info *WorkerInfo) error {
 		batch := make([]T, 0, maxSize)
 		timer := time.NewTimer(maxDelay)
+		defer timer.Stop()
 		timer.Stop() // don't start until first item
 
 		flush := func() error {
@@ -102,7 +103,8 @@ func BatchChannelWorker[T any](ch <-chan T, maxSize int, maxDelay time.Duration,
 		for {
 			select {
 			case <-ctx.Done():
-				// Flush remaining items before exit.
+				// Best-effort flush on shutdown — error is dropped because
+				// the context is already cancelled and the caller gets ctx.Err().
 				_ = flush()
 				return ctx.Err()
 

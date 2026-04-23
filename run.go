@@ -141,9 +141,8 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	// but children are attached to the long-lived childSup).
 	defer func() {
 		info.childrenMu.Lock()
-		for name, entry := range info.children {
-			_ = info.sup.Remove(entry.token)
-			delete(info.children, name)
+		for name := range info.children {
+			info.removeLocked(name)
 		}
 		info.childrenMu.Unlock()
 	}()
