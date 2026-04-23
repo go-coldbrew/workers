@@ -24,6 +24,7 @@ func EveryInterval(d time.Duration, fn CycleFunc) CycleFunc {
 // If initialDelay > 0, the first tick is delayed by that amount instead of
 // the computed interval.
 func everyIntervalWithJitter(base time.Duration, jitterPercent int, initialDelay time.Duration, fn CycleFunc) CycleFunc {
+	base = max(base, time.Millisecond)
 	return func(ctx context.Context, info *WorkerInfo) error {
 		computeInterval := func() time.Duration {
 			if jitterPercent <= 0 {
@@ -83,6 +84,7 @@ func ChannelWorker[T any](ch <-chan T, fn func(ctx context.Context, info *Worker
 // in the current batch — whichever comes first. Flushes any partial batch
 // on context cancellation or channel close before returning.
 func BatchChannelWorker[T any](ch <-chan T, maxSize int, maxDelay time.Duration, fn func(ctx context.Context, info *WorkerInfo, batch []T) error) CycleFunc {
+	maxSize = max(maxSize, 1)
 	return func(ctx context.Context, info *WorkerInfo) error {
 		batch := make([]T, 0, maxSize)
 		timer := time.NewTimer(maxDelay)

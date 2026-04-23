@@ -40,7 +40,6 @@
 //
 // Common patterns are provided as helpers:
 //   - [EveryInterval] — periodic execution on a fixed interval
-//   - [EveryIntervalWithJitter] — periodic execution with jitter to prevent thundering herd
 //   - [ChannelWorker] — consume items from a channel one at a time
 //   - [BatchChannelWorker] — collect items into batches, flush on size or timer
 //
@@ -72,11 +71,12 @@ type WorkerInfo struct {
 	attempt int
 
 	// child management, set by framework
-	sup      *suture.Supervisor
-	children *sync.Map // name (string) → suture.ServiceToken
-	cfg      *runConfig
-	active   *atomic.Int32
-	metrics  Metrics
+	sup        *suture.Supervisor
+	childrenMu sync.Mutex
+	children   map[string]suture.ServiceToken
+	cfg        *runConfig
+	active     *atomic.Int32
+	metrics    Metrics
 }
 
 // Name returns the worker's name as passed to [NewWorker].
@@ -101,17 +101,19 @@ func (info *WorkerInfo) Add(w *Worker) {
 	if info.sup == nil {
 		return
 	}
-	// Inherit parent metrics if the child doesn't override.
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+
 	if w.metrics == nil {
 		w.metrics = info.metrics
 	}
 	// Remove existing worker with the same name (replace semantics).
-	if tok, loaded := info.children.LoadAndDelete(w.name); loaded {
-		_ = info.sup.Remove(tok.(suture.ServiceToken))
+	if tok, ok := info.children[w.name]; ok {
+		_ = info.sup.Remove(tok)
+		delete(info.children, w.name)
 	}
-	// Each child gets its own supervisor subtree, scoped to this parent.
 	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active)
-	info.children.Store(w.name, tok)
+	info.children[w.name] = tok
 }
 
 // Remove stops a child worker by name.
@@ -119,19 +121,23 @@ func (info *WorkerInfo) Remove(name string) {
 	if info.sup == nil {
 		return
 	}
-	if tok, loaded := info.children.LoadAndDelete(name); loaded {
-		_ = info.sup.Remove(tok.(suture.ServiceToken))
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+
+	if tok, ok := info.children[name]; ok {
+		_ = info.sup.Remove(tok)
+		delete(info.children, name)
 	}
 }
 
 // Children returns the names of currently running child workers.
 func (info *WorkerInfo) Children() []string {
-	var names []string
-	if info.children != nil {
-		info.children.Range(func(key, _ any) bool {
-			names = append(names, key.(string))
-			return true
-		})
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+
+	names := make([]string, 0, len(info.children))
+	for name := range info.children {
+		names = append(names, name)
 	}
 	slices.Sort(names)
 	return names
@@ -221,7 +227,7 @@ func (w *Worker) WithInitialDelay(d time.Duration) *Worker {
 
 // Interceptors replaces the worker-level interceptor list.
 func (w *Worker) Interceptors(mw ...Middleware) *Worker {
-	w.interceptors = mw
+	w.interceptors = append([]Middleware(nil), mw...)
 	return w
 }
 

@@ -12,16 +12,20 @@ import (
 )
 
 type mockLocker struct {
-	mu       sync.Mutex
-	acquired bool
+	mu         sync.Mutex
+	acquired   bool
 	acquireErr error
-	released bool
+	acquireKey string
+	acquireTTL time.Duration
+	released   bool
 	releaseKey string
 }
 
-func (m *mockLocker) Acquire(_ context.Context, _ string, _ time.Duration) (bool, error) {
+func (m *mockLocker) Acquire(_ context.Context, key string, ttl time.Duration) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.acquireKey = key
+	m.acquireTTL = ttl
 	if m.acquireErr != nil {
 		return false, m.acquireErr
 	}
@@ -116,5 +120,7 @@ func TestDistributedLock_CustomKeyAndTTL(t *testing.T) {
 
 	locker.mu.Lock()
 	defer locker.mu.Unlock()
+	assert.Equal(t, "custom:custom", locker.acquireKey)
+	assert.Equal(t, time.Minute, locker.acquireTTL)
 	assert.Equal(t, "custom:custom", locker.releaseKey)
 }

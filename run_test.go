@@ -221,25 +221,54 @@ func TestRun_MiddlewareOrdering(t *testing.T) {
 }
 
 func TestRun_HandlerClose(t *testing.T) {
-	var closed atomic.Bool
+	var closeCount atomic.Int32
 
 	handler := &closableHandler{
 		runCycle: func(ctx context.Context, _ *WorkerInfo) error {
-			return nil // exit immediately
+			<-ctx.Done()
+			return ctx.Err()
 		},
 		close: func() error {
-			closed.Store(true)
+			closeCount.Add(1)
 			return nil
 		},
 	}
 
 	w := NewWorker("test").Handler(handler)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
 	Run(ctx, []*Worker{w})
-	assert.True(t, closed.Load(), "Close() should be called when worker stops")
+	assert.Equal(t, int32(1), closeCount.Load(), "Close() should be called exactly once on shutdown")
+}
+
+func TestRun_HandlerClose_NotCalledOnRestart(t *testing.T) {
+	var closeCount atomic.Int32
+	var attempts atomic.Int32
+
+	handler := &closableHandler{
+		runCycle: func(ctx context.Context, _ *WorkerInfo) error {
+			if attempts.Add(1) <= 2 {
+				return errors.New("transient")
+			}
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		close: func() error {
+			closeCount.Add(1)
+			return nil
+		},
+	}
+
+	w := NewWorker("test").Handler(handler).WithRestart(true)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	Run(ctx, []*Worker{w})
+	assert.GreaterOrEqual(t, int(attempts.Load()), 3, "should have restarted")
+	assert.Equal(t, int32(1), closeCount.Load(), "Close() should be called once, not per restart")
 }
 
 type closableHandler struct {

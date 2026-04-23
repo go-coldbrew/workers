@@ -39,7 +39,7 @@ Key properties:
 
 ## Key Types
 
-- `WorkerInfo` — struct with `Name`, `Attempt`, and child management (`Add`, `Remove`, `Children`)
+- `WorkerInfo` — struct with `Name()`, `Attempt()` getters and child management (`Add`, `Remove`, `Children`)
 - `CycleHandler` — interface: `RunCycle(ctx, *WorkerInfo) error` + `Close() error`
 - `CycleFunc` — function adapter for `CycleHandler` (Close is no-op)
 - `Middleware` — `func(ctx, *WorkerInfo, next CycleFunc) error` (interceptor pattern)

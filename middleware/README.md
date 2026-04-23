@@ -60,7 +60,7 @@ workers.Run(ctx, myWorkers,
 ```
 
 <a name="DistributedLock"></a>
-## func [DistributedLock](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L50>)
+## func [DistributedLock](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L52>)
 
 ```go
 func DistributedLock(locker Locker, opts ...LockOption) workers.Middleware
@@ -87,13 +87,13 @@ func LogContext() workers.Middleware
 LogContext injects worker name and attempt into the log context so all log calls inside the worker automatically include them.
 
 <a name="Recover"></a>
-## func [Recover](<https://github.com/go-coldbrew/workers/blob/main/middleware/recover.go#L12>)
+## func [Recover](<https://github.com/go-coldbrew/workers/blob/main/middleware/recover.go#L13>)
 
 ```go
 func Recover(onPanic func(name string, v any)) workers.Middleware
 ```
 
-Recover catches panics per\-cycle, calls onPanic \(if non\-nil\), and returns an error. The panic does not propagate to the supervisor.
+Recover catches panics per\-cycle, calls onPanic \(if non\-nil\), and returns an error. The panic does not propagate to the supervisor — even if onPanic itself panics.
 
 <a name="Slog"></a>
 ## func [Slog](<https://github.com/go-coldbrew/workers/blob/main/middleware/slog.go#L12>)
@@ -123,7 +123,7 @@ func Tracing() workers.Middleware
 Tracing creates an OTEL span per cycle via go\-coldbrew/tracing. The span is named "worker:\<name\>:cycle" and records errors.
 
 <a name="LockOption"></a>
-## type [LockOption](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L20>)
+## type [LockOption](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L22>)
 
 LockOption configures [DistributedLock](<#DistributedLock>) behavior.
 
@@ -132,7 +132,7 @@ type LockOption func(*lockConfig)
 ```
 
 <a name="WithKeyFunc"></a>
-### func [WithKeyFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L30>)
+### func [WithKeyFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L32>)
 
 ```go
 func WithKeyFunc(fn func(name string) string) LockOption
@@ -141,7 +141,7 @@ func WithKeyFunc(fn func(name string) string) LockOption
 WithKeyFunc sets a custom function to derive the lock key from the worker name. Default: "worker\-lock:\<name\>".
 
 <a name="WithOnNotAcquired"></a>
-### func [WithOnNotAcquired](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L42>)
+### func [WithOnNotAcquired](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L44>)
 
 ```go
 func WithOnNotAcquired(fn func(ctx context.Context, name string) error) LockOption
@@ -150,7 +150,7 @@ func WithOnNotAcquired(fn func(ctx context.Context, name string) error) LockOpti
 WithOnNotAcquired sets a callback invoked when the lock is held by another instance. The cycle is skipped. Default: skip silently \(return nil\).
 
 <a name="WithTTLFunc"></a>
-### func [WithTTLFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L36>)
+### func [WithTTLFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L38>)
 
 ```go
 func WithTTLFunc(fn func(name string) time.Duration) LockOption
@@ -159,7 +159,7 @@ func WithTTLFunc(fn func(name string) time.Duration) LockOption
 WithTTLFunc sets a custom function to derive the lock TTL from the worker name. Default: 30s.
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L11-L17>)
+## type [Locker](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L13-L19>)
 
 Locker abstracts a distributed lock backend \(e.g., Redis, etcd, Consul\).
 

@@ -3,7 +3,6 @@ package workers
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 
 	"github.com/thejerf/suture/v4"
@@ -73,14 +72,30 @@ func buildChain(middlewares []Middleware, handler CycleHandler) CycleFunc {
 // that runs inside the worker's own child supervisor.
 type workerRunService struct {
 	w        *Worker
-	runFn    CycleFunc          // fully resolved: chain + interval wrapping
-	handler  CycleHandler       // original handler, for Close()
+	runFn    CycleFunc // fully resolved: chain + interval wrapping
 	childSup *suture.Supervisor
 	metrics  Metrics
 	active   *atomic.Int32
 	cfg      *runConfig
 	attempt  atomic.Int32
 }
+
+// closerService calls handler.Close() exactly once when the worker's
+// supervisor tree is torn down. It stays alive across restarts — only
+// context cancellation (permanent shutdown) triggers Close.
+type closerService struct {
+	handler CycleHandler
+}
+
+func (c *closerService) Serve(ctx context.Context) error {
+	<-ctx.Done()
+	if c.handler != nil {
+		_ = c.handler.Close()
+	}
+	return suture.ErrDoNotRestart
+}
+
+func (c *closerService) String() string { return "closer" }
 
 // Serve implements suture.Service.
 func (ws *workerRunService) Serve(ctx context.Context) error {
@@ -104,17 +119,11 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 		name:     ws.w.name,
 		attempt:  attempt,
 		sup:      ws.childSup,
-		children: &sync.Map{},
+		children: make(map[string]suture.ServiceToken),
 		cfg:      ws.cfg,
 		active:   ws.active,
 		metrics:  m,
 	}
-
-	defer func() {
-		if ws.handler != nil {
-			_ = ws.handler.Close()
-		}
-	}()
 
 	err := ws.runFn(ctx, info)
 
@@ -181,9 +190,10 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig,
 
 	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
 	childSup.Add(&workerRunService{
-		w: w, runFn: runFn, handler: handler,
+		w: w, runFn: runFn,
 		childSup: childSup, metrics: m, active: active, cfg: cfg,
 	})
+	childSup.Add(&closerService{handler: handler})
 	return parent.Add(childSup)
 }
 

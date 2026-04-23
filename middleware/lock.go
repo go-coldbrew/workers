@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/go-coldbrew/workers"
@@ -57,7 +59,7 @@ func DistributedLock(locker Locker, opts ...LockOption) workers.Middleware {
 		o(cfg)
 	}
 
-	return func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
+	return func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) (retErr error) {
 		key := cfg.keyFunc(info.Name())
 		ttl := cfg.ttlFunc(info.Name())
 
@@ -69,7 +71,9 @@ func DistributedLock(locker Locker, opts ...LockOption) workers.Middleware {
 			return cfg.onNotAcquired(ctx, info.Name())
 		}
 		defer func() {
-			_ = locker.Release(context.WithoutCancel(ctx), key)
+			if releaseErr := locker.Release(context.WithoutCancel(ctx), key); releaseErr != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("release lock %q: %w", key, releaseErr))
+			}
 		}()
 		return next(ctx, info)
 	}
