@@ -119,7 +119,7 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 		name:     ws.w.name,
 		attempt:  attempt,
 		sup:      ws.childSup,
-		children: make(map[string]suture.ServiceToken),
+		children: make(map[string]childEntry),
 		cfg:      ws.cfg,
 		active:   ws.active,
 		metrics:  m,

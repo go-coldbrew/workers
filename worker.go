@@ -73,10 +73,16 @@ type WorkerInfo struct {
 	// child management, set by framework
 	sup        *suture.Supervisor
 	childrenMu sync.Mutex
-	children   map[string]suture.ServiceToken
+	children   map[string]childEntry
 	cfg        *runConfig
 	active     *atomic.Int32
 	metrics    Metrics
+}
+
+// childEntry tracks a child worker and its supervisor token.
+type childEntry struct {
+	token  suture.ServiceToken
+	worker *Worker
 }
 
 // Name returns the worker's name as passed to [NewWorker].
@@ -108,12 +114,12 @@ func (info *WorkerInfo) Add(w *Worker) {
 		w.metrics = info.metrics
 	}
 	// Remove existing worker with the same name (replace semantics).
-	if tok, ok := info.children[w.name]; ok {
-		_ = info.sup.Remove(tok)
+	if entry, ok := info.children[w.name]; ok {
+		_ = info.sup.Remove(entry.token)
 		delete(info.children, w.name)
 	}
 	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active)
-	info.children[w.name] = tok
+	info.children[w.name] = childEntry{token: tok, worker: w}
 }
 
 // Remove stops a child worker by name.
@@ -124,8 +130,8 @@ func (info *WorkerInfo) Remove(name string) {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
-	if tok, ok := info.children[name]; ok {
-		_ = info.sup.Remove(tok)
+	if entry, ok := info.children[name]; ok {
+		_ = info.sup.Remove(entry.token)
 		delete(info.children, name)
 	}
 }
@@ -141,6 +147,17 @@ func (info *WorkerInfo) Children() []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// Child returns the Worker for a running child, or nil if not found.
+func (info *WorkerInfo) Child(name string) *Worker {
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+
+	if entry, ok := info.children[name]; ok {
+		return entry.worker
+	}
+	return nil
 }
 
 // CycleHandler handles worker execution cycles.
@@ -187,6 +204,12 @@ type Worker struct {
 func NewWorker(name string) *Worker {
 	return &Worker{name: name, jitterPercent: -1}
 }
+
+// GetName returns the worker's name.
+func (w *Worker) GetName() string { return w.name }
+
+// GetHandler returns the worker's [CycleHandler], or nil if not set.
+func (w *Worker) GetHandler() CycleHandler { return w.handler }
 
 // Handler sets the worker's [CycleHandler]. Use this for handlers that
 // need cleanup via Close (e.g., database connections, leases).
