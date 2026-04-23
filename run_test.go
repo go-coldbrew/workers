@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -96,6 +97,20 @@ func TestRun_NoRestartOnFail(t *testing.T) {
 	err := Run(ctx, []*Worker{w})
 	assert.NoError(t, err)
 	assert.Equal(t, int32(1), attempts.Load(), "should not restart")
+}
+
+func TestRun_WrappedErrDoNotRestart(t *testing.T) {
+	var attempts atomic.Int32
+	w := NewWorker("wrapped-stop").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		attempts.Add(1)
+		return fmt.Errorf("work done: %w", ErrDoNotRestart)
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w})
+	assert.Equal(t, int32(1), attempts.Load(), "wrapped ErrDoNotRestart should prevent restart")
 }
 
 func TestRun_WorkerInfoName(t *testing.T) {

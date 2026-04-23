@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -156,6 +157,11 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	// Suppress restart when the worker doesn't want it and either exited
 	// cleanly or the context was cancelled (graceful shutdown).
 	if !ws.w.restartOnFail && (err == nil || ctx.Err() != nil) {
+		return suture.ErrDoNotRestart
+	}
+	// Unwrap wrapped ErrDoNotRestart so suture recognizes the sentinel.
+	// Middleware may wrap it (e.g. fmt.Errorf("done: %w", ErrDoNotRestart)).
+	if errors.Is(err, suture.ErrDoNotRestart) {
 		return suture.ErrDoNotRestart
 	}
 	return err

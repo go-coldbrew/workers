@@ -271,7 +271,7 @@ var ErrDoNotRestart = suture.ErrDoNotRestart
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L227>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L233>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -327,7 +327,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L250>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L256>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
@@ -700,7 +700,7 @@ type Middleware func(ctx context.Context, info *WorkerInfo, next CycleFunc) erro
 ```
 
 <a name="RunOption"></a>
-## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L18>)
+## type [RunOption](<https://github.com/go-coldbrew/workers/blob/main/run.go#L19>)
 
 RunOption configures the behavior of [Run](<#Run>).
 
@@ -709,7 +709,7 @@ type RunOption func(*runConfig)
 ```
 
 <a name="AddInterceptors"></a>
-### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L46>)
+### func [AddInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L47>)
 
 ```go
 func AddInterceptors(mw ...Middleware) RunOption
@@ -718,7 +718,7 @@ func AddInterceptors(mw ...Middleware) RunOption
 AddInterceptors appends to the run\-level interceptor list.
 
 <a name="WithDefaultJitter"></a>
-### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L56>)
+### func [WithDefaultJitter](<https://github.com/go-coldbrew/workers/blob/main/run.go#L57>)
 
 ```go
 func WithDefaultJitter(percent int) RunOption
@@ -727,7 +727,7 @@ func WithDefaultJitter(percent int) RunOption
 WithDefaultJitter sets a run\-level default jitter percentage for all periodic workers. Worker\-level [Worker.WithJitter](<#Worker.WithJitter>) takes precedence. Setting Worker.WithJitter\(0\) disables jitter for a specific worker even when a run\-level default is set.
 
 <a name="WithInterceptors"></a>
-### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L39>)
+### func [WithInterceptors](<https://github.com/go-coldbrew/workers/blob/main/run.go#L40>)
 
 ```go
 func WithInterceptors(mw ...Middleware) RunOption
@@ -736,7 +736,7 @@ func WithInterceptors(mw ...Middleware) RunOption
 WithInterceptors replaces the run\-level interceptor list. Run\-level interceptors wrap outside worker\-level interceptors.
 
 <a name="WithMetrics"></a>
-### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L29>)
+### func [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/run.go#L30>)
 
 ```go
 func WithMetrics(m Metrics) RunOption
