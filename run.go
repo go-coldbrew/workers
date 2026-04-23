@@ -32,7 +32,7 @@ func WithMetrics(m Metrics) RunOption {
 // Run-level interceptors wrap outside worker-level interceptors.
 func WithInterceptors(mw ...Middleware) RunOption {
 	return func(c *runConfig) {
-		c.interceptors = mw
+		c.interceptors = append([]Middleware(nil), mw...)
 	}
 }
 
@@ -124,6 +124,18 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 		active:   ws.active,
 		metrics:  m,
 	}
+
+	// Remove all children spawned during this attempt so they don't
+	// leak across restarts (each attempt gets a fresh children map,
+	// but children are attached to the long-lived childSup).
+	defer func() {
+		info.childrenMu.Lock()
+		for name, entry := range info.children {
+			_ = info.sup.Remove(entry.token)
+			delete(info.children, name)
+		}
+		info.childrenMu.Unlock()
+	}()
 
 	err := ws.runFn(ctx, info)
 

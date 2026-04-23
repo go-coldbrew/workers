@@ -71,7 +71,9 @@ func DistributedLock(locker Locker, opts ...LockOption) workers.Middleware {
 			return cfg.onNotAcquired(ctx, info.Name())
 		}
 		defer func() {
-			if releaseErr := locker.Release(context.WithoutCancel(ctx), key); releaseErr != nil {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ttl)
+			defer cancel()
+			if releaseErr := locker.Release(releaseCtx, key); releaseErr != nil {
 				retErr = errors.Join(retErr, fmt.Errorf("release lock %q: %w", key, releaseErr))
 			}
 		}()
