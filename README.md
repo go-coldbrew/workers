@@ -262,7 +262,7 @@ shutdown complete
 
 
 <a name="Run"></a>
-## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L217>)
+## func [Run](<https://github.com/go-coldbrew/workers/blob/main/run.go#L219>)
 
 ```go
 func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error
@@ -318,7 +318,7 @@ all workers stopped
 </details>
 
 <a name="RunWorker"></a>
-## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L240>)
+## func [RunWorker](<https://github.com/go-coldbrew/workers/blob/main/run.go#L242>)
 
 ```go
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)

@@ -90,7 +90,9 @@ type closerService struct {
 func (c *closerService) Serve(ctx context.Context) error {
 	<-ctx.Done()
 	if c.handler != nil {
-		_ = c.handler.Close()
+		if err := c.handler.Close(); err != nil {
+			slog.Error("worker handler close failed", "error", err)
+		}
 	}
 	return suture.ErrDoNotRestart
 }

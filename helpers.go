@@ -16,7 +16,7 @@ func EveryInterval(d time.Duration, fn CycleFunc) CycleFunc {
 // everyIntervalWithJitter wraps fn in a timer loop with configurable jitter
 // and initial delay.
 //
-// On each tick: spread = base * jitterPercent / 100; jittered = base - spread + rand(2*spread).
+// On each tick: spread = base * jitterPercent / 100; jittered = base - spread + rand(2*spread+1).
 // The effective interval is clamped to a minimum of 1ms.
 // Uses [time.NewTimer] + Reset for variable intervals (not time.Ticker).
 //
