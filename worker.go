@@ -140,21 +140,30 @@ func NewWorkerInfo(name string, attempt int, opts ...WorkerInfoOption) *WorkerIn
 	return info
 }
 
-// Add adds or replaces a child worker under this worker's supervisor subtree.
-// If a worker with the same name already exists, it is removed first.
+// Add starts a child worker under this worker's supervisor subtree.
+// Returns true if the worker was added, false if a worker with the same
+// name is already running (no-op). To replace a running worker, call
+// [WorkerInfo.Remove] first then Add.
+//
+// Note: Remove + Add is not atomic — there is a brief window where the
+// worker is not running. For most reconciliation patterns this is fine.
+//
 // Children inherit run-level interceptors, metrics (unless overridden via
 // [Worker.WithMetrics]), and scoped lifecycle — when this worker stops,
 // all its children stop too.
-func (info *WorkerInfo) Add(w *Worker) {
+func (info *WorkerInfo) Add(w *Worker) bool {
 	if info.sup == nil {
-		return
+		return false
 	}
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
-	info.removeLocked(w.name)
+	if _, ok := info.children[w.name]; ok {
+		return false
+	}
 	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active, info.metrics)
 	info.children[w.name] = childEntry{token: tok, worker: w}
+	return true
 }
 
 // Remove stops a child worker by name.

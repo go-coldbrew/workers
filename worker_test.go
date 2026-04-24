@@ -166,6 +166,44 @@ func TestWorkerInfo_GetChild(t *testing.T) {
 	assert.True(t, child2.restartOnFail, "mutation on copy should not affect original")
 }
 
+func TestWorkerInfo_Add_SkipsExisting(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	childFn := CycleFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	added := info.Add(NewWorker("child").HandlerFunc(childFn))
+	assert.True(t, added, "first Add should succeed")
+	time.Sleep(20 * time.Millisecond)
+
+	// Second Add with same name is a no-op.
+	added = info.Add(NewWorker("child").HandlerFunc(childFn))
+	assert.False(t, added, "duplicate Add should be skipped")
+
+	assert.Equal(t, []string{"child"}, info.GetChildren())
+}
+
+func TestWorkerInfo_Add_AfterRemove(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	childFn := CycleFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	info.Add(NewWorker("child").HandlerFunc(childFn))
+	time.Sleep(20 * time.Millisecond)
+
+	info.Remove("child")
+	time.Sleep(20 * time.Millisecond)
+
+	// After Remove, Add should succeed again.
+	added := info.Add(NewWorker("child").HandlerFunc(childFn))
+	assert.True(t, added, "Add after Remove should succeed")
+}
+
 func TestNewWorkerInfo_WithTestChildren(t *testing.T) {
 	info := NewWorkerInfo("test-parent", 0, WithTestChildren(t.Context()))
 

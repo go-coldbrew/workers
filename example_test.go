@@ -235,8 +235,8 @@ func ExampleWorkerInfo_Add() {
 	// after remove: [child-b]
 }
 
-// Replace a child worker by adding one with the same name.
-// The old worker is stopped and the new one takes its place.
+// Replace a child worker using Remove + Add.
+// Add is a no-op if the name exists, so Remove first.
 func ExampleWorkerInfo_Add_replace() {
 	manager := workers.NewWorker("manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
 		info.Add(workers.NewWorker("processor").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
@@ -246,7 +246,9 @@ func ExampleWorkerInfo_Add_replace() {
 		}))
 		time.Sleep(30 * time.Millisecond)
 
-		// Replace with a new version — old one is stopped automatically.
+		// Replace: Remove the old worker, then Add the new one.
+		info.Remove("processor")
+		time.Sleep(10 * time.Millisecond) // brief gap while old stops
 		info.Add(workers.NewWorker("processor").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 			fmt.Println("processor v2")
 			<-ctx.Done()
