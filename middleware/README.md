@@ -96,13 +96,13 @@ func Recover(onPanic func(name string, v any)) workers.Middleware
 Recover catches panics per\-cycle, calls onPanic \(if non\-nil\), and returns an error. The panic does not propagate to the supervisor — even if onPanic itself panics.
 
 <a name="Slog"></a>
-## func [Slog](<https://github.com/go-coldbrew/workers/blob/main/middleware/slog.go#L13>)
+## func [Slog](<https://github.com/go-coldbrew/workers/blob/main/middleware/slog.go#L14>)
 
 ```go
 func Slog() workers.Middleware
 ```
 
-Slog logs each cycle via go\-coldbrew/log. Logs at Info on success, Error on failure. Pair with [LogContext](<#LogContext>) to include worker name and attempt in every log line automatically.
+Slog emits structured log lines per cycle via go\-coldbrew/log: "cycle start" \(Info\) before the handler, then "cycle end" \(Info\) on success or "cycle error" \(Error\) on failure. Pair with [LogContext](<#LogContext>) to include worker name and attempt in every log line automatically.
 
 <a name="Timeout"></a>
 ## func [Timeout](<https://github.com/go-coldbrew/workers/blob/main/middleware/timeout.go#L12>)

@@ -19,6 +19,20 @@
 //	    workers.NewWorker("cleanup").HandlerFunc(cleanup).Every(5 * time.Minute),
 //	})
 //
+// # Handler Contract
+//
+// For long-running workers (no [Worker.Every]): the handler should block
+// until ctx is cancelled, then return ctx.Err().
+//
+// For periodic workers (with [Worker.Every]): the handler runs once per tick
+// and should return quickly. Returning nil means success (the next tick
+// will fire). Returning an error triggers restart (if enabled) or stops
+// the worker.
+//
+// Returning nil from a non-periodic handler stops the worker permanently,
+// even with restart enabled. Use [ErrDoNotRestart] for explicit permanent
+// completion from periodic handlers.
+//
 // # Middleware
 //
 // Cross-cutting concerns like tracing, logging, and panic recovery are
@@ -91,11 +105,39 @@ func (info *WorkerInfo) GetName() string { return info.name }
 // GetAttempt returns the restart attempt number (0 on first run).
 func (info *WorkerInfo) GetAttempt() int { return info.attempt }
 
+// WorkerInfoOption configures a [WorkerInfo] created by [NewWorkerInfo].
+type WorkerInfoOption func(*WorkerInfo)
+
+// WithTestChildren creates an internal supervisor so that Add, Remove,
+// and GetChildren work in tests without calling [Run]. The caller must
+// cancel the returned context when the test is done to stop the supervisor.
+//
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//	info := workers.NewWorkerInfo("test", 0, workers.WithTestChildren(ctx))
+func WithTestChildren(ctx context.Context) WorkerInfoOption {
+	return func(info *WorkerInfo) {
+		sup := suture.New("test:"+info.name, suture.Spec{})
+		go sup.Serve(ctx) //nolint:errcheck
+		info.sup = sup
+		info.children = make(map[string]childEntry)
+		info.cfg = &runConfig{metrics: BaseMetrics{}, defaultJitter: -1}
+		info.active = &atomic.Int32{}
+		info.metrics = BaseMetrics{}
+	}
+}
+
 // NewWorkerInfo creates a [WorkerInfo] with the given name and attempt.
-// This is useful for testing middleware — the framework creates fully
-// populated instances internally.
-func NewWorkerInfo(name string, attempt int) *WorkerInfo {
-	return &WorkerInfo{name: name, attempt: attempt}
+// This is useful for testing middleware and handlers — the framework
+// creates fully populated instances internally.
+//
+// Use [WithTestChildren] to enable Add/Remove/GetChildren in tests.
+func NewWorkerInfo(name string, attempt int, opts ...WorkerInfoOption) *WorkerInfo {
+	info := &WorkerInfo{name: name, attempt: attempt}
+	for _, opt := range opts {
+		opt(info)
+	}
+	return info
 }
 
 // Add adds or replaces a child worker under this worker's supervisor subtree.
@@ -262,7 +304,8 @@ func (w *Worker) AddInterceptors(mw ...Middleware) *Worker {
 
 // WithRestart configures whether the worker should be restarted on failure.
 // Default is true. Set to false for one-shot workers that should exit after
-// completion or failure.
+// completion or failure. Note: a handler returning nil always stops the
+// worker permanently, regardless of this setting.
 func (w *Worker) WithRestart(restart bool) *Worker {
 	w.restartOnFail = restart
 	return w
