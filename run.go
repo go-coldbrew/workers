@@ -206,7 +206,7 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig,
 		})
 	}
 
-	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m, closeFn)))
+	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m, w.name, closeFn)))
 	childSup.Add(&workerRunService{
 		w: w, runFn: runFn, closeFn: closeFn,
 		childSup: childSup, metrics: m, active: active, cfg: cfg,
@@ -228,7 +228,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 	active := &atomic.Int32{}
 
 	root := suture.New("workers", suture.Spec{
-		EventHook: makeEventHook(cfg.metrics, func() {}),
+		EventHook: makeEventHook(cfg.metrics, "", func() {}),
 	})
 	for _, w := range workers {
 		addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
@@ -249,7 +249,7 @@ func RunWorker(ctx context.Context, w *Worker, opts ...RunOption) {
 
 // makeEventHook returns a suture event hook that logs events and records
 // panic metrics.
-func makeEventHook(m Metrics, onPermanentStop func()) suture.EventHook {
+func makeEventHook(m Metrics, workerName string, onPermanentStop func()) suture.EventHook {
 	return func(e suture.Event) {
 		em := e.Map()
 		switch e.Type() {
@@ -258,7 +258,7 @@ func makeEventHook(m Metrics, onPermanentStop func()) suture.EventHook {
 			m.WorkerPanicked(name)
 			slog.Error("worker panicked", "worker", em["service_name"], "event", e.String())
 		case suture.EventTypeServiceTerminate:
-			if evt, ok := e.(suture.EventServiceTerminate); ok && !evt.Restarting {
+			if evt, ok := e.(suture.EventServiceTerminate); ok && !evt.Restarting && evt.ServiceName == workerName {
 				onPermanentStop()
 			}
 			slog.Warn("worker terminated", "worker", em["service_name"], "event", e.String())
