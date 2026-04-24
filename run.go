@@ -81,40 +81,16 @@ func buildChain(middlewares []Middleware, handler CycleHandler) CycleFunc {
 type workerRunService struct {
 	w        *Worker
 	runFn    CycleFunc // fully resolved: chain + interval wrapping
+	closeFn  func() // calls handler.Close() exactly once via shared sync.Once
 	childSup *suture.Supervisor
 	metrics  Metrics
 	active   *atomic.Int32
 	cfg      *runConfig
 	attempt  atomic.Int32
-	wg       *sync.WaitGroup // shared with closerService to sequence Close after RunCycle
 }
-
-// closerService calls handler.Close() exactly once when the worker's
-// supervisor tree is torn down. It stays alive across restarts — only
-// context cancellation (permanent shutdown) triggers Close.
-type closerService struct {
-	handler CycleHandler
-	wg      *sync.WaitGroup // wait for active RunCycle to finish before Close
-}
-
-func (c *closerService) Serve(ctx context.Context) error {
-	<-ctx.Done()
-	c.wg.Wait() // wait for RunCycle to finish, preventing Close/RunCycle race
-	if c.handler != nil {
-		if err := c.handler.Close(); err != nil {
-			slog.Error("worker handler close failed", "error", err)
-		}
-	}
-	return suture.ErrDoNotRestart
-}
-
-func (c *closerService) String() string { return "closer" }
 
 // Serve implements suture.Service.
 func (ws *workerRunService) Serve(ctx context.Context) error {
-	ws.wg.Add(1)
-	defer ws.wg.Done()
-
 	attempt := int(ws.attempt.Add(1) - 1)
 
 	m := ws.metrics
@@ -160,15 +136,11 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 		m.WorkerFailed(ws.w.name, err)
 	}
 
-	// Suppress restart when: restart is disabled, handler exited cleanly,
-	// or context was cancelled. Only allow restarts when restartOnFail is
-	// true AND the handler returned a non-nil error AND the context is live.
-	if !ws.w.restartOnFail || err == nil || ctx.Err() != nil {
-		return suture.ErrDoNotRestart
-	}
-	// Unwrap wrapped ErrDoNotRestart so suture recognizes the sentinel.
-	// Middleware may wrap it (e.g. fmt.Errorf("done: %w", ErrDoNotRestart)).
-	if errors.Is(err, suture.ErrDoNotRestart) {
+	// Determine whether this worker is permanently stopping.
+	permanentStop := !ws.w.restartOnFail || err == nil || ctx.Err() != nil || errors.Is(err, suture.ErrDoNotRestart)
+
+	if permanentStop {
+		ws.closeFn()
 		return suture.ErrDoNotRestart
 	}
 	return err
@@ -223,13 +195,22 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig,
 		runFn = everyIntervalWithJitter(w.interval, jitter, w.initialDelay, runFn)
 	}
 
-	var wg sync.WaitGroup
-	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
+	var closeOnce sync.Once
+	closeFn := func() {
+		closeOnce.Do(func() {
+			if handler != nil {
+				if err := handler.Close(); err != nil {
+					slog.Error("worker handler close failed", "worker", w.name, "error", err)
+				}
+			}
+		})
+	}
+
+	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m, closeFn)))
 	childSup.Add(&workerRunService{
-		w: w, runFn: runFn,
-		childSup: childSup, metrics: m, active: active, cfg: cfg, wg: &wg,
+		w: w, runFn: runFn, closeFn: closeFn,
+		childSup: childSup, metrics: m, active: active, cfg: cfg,
 	})
-	childSup.Add(&closerService{handler: handler, wg: &wg})
 	return parent.Add(childSup)
 }
 
@@ -247,7 +228,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 	active := &atomic.Int32{}
 
 	root := suture.New("workers", suture.Spec{
-		EventHook: makeEventHook(cfg.metrics),
+		EventHook: makeEventHook(cfg.metrics, func() {}),
 	})
 	for _, w := range workers {
 		addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
@@ -267,7 +248,7 @@ func RunWorker(ctx context.Context, w *Worker, opts ...RunOption) {
 
 // makeEventHook returns a suture event hook that logs events and records
 // panic metrics.
-func makeEventHook(m Metrics) suture.EventHook {
+func makeEventHook(m Metrics, onPermanentStop func()) suture.EventHook {
 	return func(e suture.Event) {
 		em := e.Map()
 		switch e.Type() {
@@ -276,6 +257,9 @@ func makeEventHook(m Metrics) suture.EventHook {
 			m.WorkerPanicked(name)
 			slog.Error("worker panicked", "worker", em["service_name"], "event", e.String())
 		case suture.EventTypeServiceTerminate:
+			if evt, ok := e.(suture.EventServiceTerminate); ok && !evt.Restarting {
+				onPermanentStop()
+			}
 			slog.Warn("worker terminated", "worker", em["service_name"], "event", e.String())
 		case suture.EventTypeBackoff:
 			slog.Warn("worker backoff", "event", e.String())
