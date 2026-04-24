@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/thejerf/suture/v4"
 )
 
 func TestNewWorker(t *testing.T) {
@@ -95,4 +96,118 @@ func TestWorkerInfo_Children_Nil(t *testing.T) {
 func TestCycleFunc_Close(t *testing.T) {
 	fn := CycleFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
 	assert.NoError(t, fn.Close(), "CycleFunc.Close should be a no-op")
+}
+
+func TestWorker_GetName(t *testing.T) {
+	w := NewWorker("my-worker").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	assert.Equal(t, "my-worker", w.GetName())
+}
+
+func TestWorker_GetHandler(t *testing.T) {
+	fn := CycleFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w := NewWorker("test").HandlerFunc(fn)
+	assert.NotNil(t, w.GetHandler())
+
+	w2 := NewWorker("no-handler")
+	assert.Nil(t, w2.GetHandler())
+}
+
+func TestWorker_WithFailureDecay(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.WithFailureDecay(2.0)
+	assert.Equal(t, 2.0, w.failureDecay)
+}
+
+func TestWorker_WithFailureThreshold(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.WithFailureThreshold(10)
+	assert.Equal(t, 10.0, w.failureThreshold)
+}
+
+func TestWorker_WithFailureBackoff(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.WithFailureBackoff(5 * time.Second)
+	assert.Equal(t, 5*time.Second, w.failureBackoff)
+}
+
+func TestWorker_WithTimeout(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.WithTimeout(30 * time.Second)
+	assert.Equal(t, 30*time.Second, w.timeout)
+}
+
+func TestWorker_WithBackoffJitter(t *testing.T) {
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.WithBackoffJitter(suture.NoJitter{})
+	assert.NotNil(t, w.backoffJitter)
+}
+
+func TestWorkerInfo_GetChild(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// No child yet.
+	_, ok := info.GetChild("nonexistent")
+	assert.False(t, ok)
+
+	// Add a child.
+	info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	time.Sleep(20 * time.Millisecond) // let child start
+
+	child, ok := info.GetChild("child")
+	assert.True(t, ok)
+	assert.Equal(t, "child", child.GetName())
+
+	// Verify it's a copy — mutations don't affect the running worker.
+	child.WithRestart(false)
+	child2, _ := info.GetChild("child")
+	assert.True(t, child2.restartOnFail, "mutation on copy should not affect original")
+}
+
+func TestNewWorkerInfo_WithTestChildren(t *testing.T) {
+	info := NewWorkerInfo("test-parent", 0, WithTestChildren(t.Context()))
+
+	// Verify Add/Remove/GetChildren work.
+	info.Add(NewWorker("a").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	info.Add(NewWorker("b").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	time.Sleep(20 * time.Millisecond)
+
+	assert.Equal(t, []string{"a", "b"}, info.GetChildren())
+
+	info.Remove("a")
+	time.Sleep(20 * time.Millisecond)
+
+	assert.Equal(t, []string{"b"}, info.GetChildren())
+}
+
+func TestNewWorkerInfo_Minimal(t *testing.T) {
+	// Without options, Add/Remove/GetChildren are safe no-ops.
+	info := NewWorkerInfo("test", 5)
+	assert.Equal(t, "test", info.GetName())
+	assert.Equal(t, 5, info.GetAttempt())
+	assert.Empty(t, info.GetChildren())
+
+	// Add on nil sup is a no-op.
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil }))
+	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorker_InterceptorsCopiesSlice(t *testing.T) {
+	mw := func(_ context.Context, _ *WorkerInfo, next CycleFunc) error { return next(nil, nil) }
+	original := []Middleware{mw}
+
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	w.Interceptors(original...)
+
+	// Mutate the original slice — should not affect the worker.
+	original[0] = nil
+	assert.NotNil(t, w.interceptors[0], "Interceptors should copy the slice")
 }

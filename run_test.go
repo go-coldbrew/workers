@@ -367,3 +367,88 @@ func TestRun_WithDefaultJitter(t *testing.T) {
 	Run(ctx, []*Worker{w}, WithDefaultJitter(20))
 	assert.GreaterOrEqual(t, int(count.Load()), 2, "should tick multiple times with jitter")
 }
+
+func TestRun_AddInterceptors(t *testing.T) {
+	var order []string
+	var mu sync.Mutex
+
+	mw := func(tag string) Middleware {
+		return func(ctx context.Context, info *WorkerInfo, next CycleFunc) error {
+			mu.Lock()
+			order = append(order, tag)
+			mu.Unlock()
+			return next(ctx, info)
+		}
+	}
+
+	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		mu.Lock()
+		order = append(order, "handler")
+		mu.Unlock()
+		return nil
+	}).WithRestart(false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w},
+		WithInterceptors(mw("base")),
+		AddInterceptors(mw("extra")),
+	)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, []string{"base", "extra", "handler"}, order)
+}
+
+func TestRun_ClosingSupervisor_ClosesOnShutdown(t *testing.T) {
+	var closeCount atomic.Int32
+	handler := &closableHandler{
+		runCycle: func(ctx context.Context, _ *WorkerInfo) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		close: func() error {
+			closeCount.Add(1)
+			return nil
+		},
+	}
+
+	w := NewWorker("test").Handler(handler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w})
+	assert.Equal(t, int32(1), closeCount.Load(), "Close should be called exactly once")
+}
+
+func TestRun_ErrDoNotRestart_NotCountedAsFailure(t *testing.T) {
+	m := newMockMetrics()
+	w := NewWorker("completer").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return ErrDoNotRestart
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w}, WithMetrics(m))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	assert.Empty(t, m.failed, "ErrDoNotRestart should not be counted as failure")
+}
+
+func TestRun_ResolveMetrics_DefaultFallback(t *testing.T) {
+	// Worker with no metrics, no parent metrics — should use BaseMetrics.
+	w := NewWorker("test").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Should not panic.
+	Run(ctx, []*Worker{w})
+}
