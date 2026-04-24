@@ -196,7 +196,7 @@ func Example_standalone() {
 }
 
 // A manager worker that dynamically spawns and removes child workers
-// using WorkerInfo.Add, Remove, and Children.
+// using WorkerInfo.Add, Remove, and GetChildren.
 func ExampleWorkerInfo_Add() {
 	manager := workers.NewWorker("manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
 		// Spawn two child workers dynamically.

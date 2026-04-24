@@ -241,7 +241,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 }
 
 // RunWorker runs a single worker with panic recovery and optional restart.
-// Blocks until ctx is cancelled or the worker exits without RestartOnFail.
+// Blocks until ctx is cancelled or the worker exits without restart.
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption) {
 	_ = Run(ctx, []*Worker{w}, opts...)
 }

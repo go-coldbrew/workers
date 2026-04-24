@@ -333,7 +333,7 @@ all workers stopped
 func RunWorker(ctx context.Context, w *Worker, opts ...RunOption)
 ```
 
-RunWorker runs a single worker with panic recovery and optional restart. Blocks until ctx is cancelled or the worker exits without RestartOnFail.
+RunWorker runs a single worker with panic recovery and optional restart. Blocks until ctx is cancelled or the worker exits without restart.
 
 <details><summary>Example</summary>
 <p>
@@ -1110,7 +1110,7 @@ Add adds or replaces a child worker under this worker's supervisor subtree. If a
 <details><summary>Example</summary>
 <p>
 
-A manager worker that dynamically spawns and removes child workers using WorkerInfo.Add, Remove, and Children.
+A manager worker that dynamically spawns and removes child workers using WorkerInfo.Add, Remove, and GetChildren.
 
 ```go
 package main
