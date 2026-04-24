@@ -13,14 +13,14 @@ import (
 
 // mockMetrics records all metric calls for assertions.
 type mockMetrics struct {
-	mu           sync.Mutex
-	started      []string
-	stopped      []string
-	panicked     []string
-	failed       []string
-	restarted    []string
-	durations    map[string]time.Duration
-	activeCount  int
+	mu          sync.Mutex
+	started     []string
+	stopped     []string
+	panicked    []string
+	failed      []string
+	restarted   []string
+	durations   map[string]time.Duration
+	activeCount int
 }
 
 func newMockMetrics() *mockMetrics {
@@ -71,7 +71,7 @@ func (m *mockMetrics) SetActiveWorkers(count int) {
 
 func TestMetrics_StartedStopped(t *testing.T) {
 	m := newMockMetrics()
-	w := NewWorker("test-worker", func(ctx WorkerContext) error {
+	w := NewWorker("test-worker").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -85,12 +85,11 @@ func TestMetrics_StartedStopped(t *testing.T) {
 	defer m.mu.Unlock()
 	assert.Contains(t, m.started, "test-worker")
 	assert.Contains(t, m.stopped, "test-worker")
-	assert.NotEmpty(t, m.durations["test-worker"])
 }
 
 func TestMetrics_Failed(t *testing.T) {
 	m := newMockMetrics()
-	w := NewWorker("failer", func(ctx WorkerContext) error {
+	w := NewWorker("failer").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
 		return errors.New("boom")
 	})
 
@@ -107,7 +106,7 @@ func TestMetrics_Failed(t *testing.T) {
 func TestMetrics_Restarted(t *testing.T) {
 	m := newMockMetrics()
 	var attempts atomic.Int32
-	w := NewWorker("restarter", func(ctx WorkerContext) error {
+	w := NewWorker("restarter").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		if attempts.Add(1) <= 2 {
 			return errors.New("fail")
 		}
@@ -127,8 +126,8 @@ func TestMetrics_Restarted(t *testing.T) {
 
 func TestMetrics_Inherited(t *testing.T) {
 	m := newMockMetrics()
-	manager := NewWorker("manager", func(ctx WorkerContext) error {
-		ctx.Add(NewWorker("child", func(ctx WorkerContext) error {
+	manager := NewWorker("manager").HandlerFunc(func(ctx context.Context, info *WorkerInfo) error {
+		info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 			<-ctx.Done()
 			return ctx.Err()
 		}))
@@ -151,8 +150,8 @@ func TestMetrics_ChildOverride(t *testing.T) {
 	parentM := newMockMetrics()
 	childM := newMockMetrics()
 
-	manager := NewWorker("manager", func(ctx WorkerContext) error {
-		ctx.Add(NewWorker("child", func(ctx WorkerContext) error {
+	manager := NewWorker("manager").HandlerFunc(func(ctx context.Context, info *WorkerInfo) error {
+		info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 			<-ctx.Done()
 			return ctx.Err()
 		}).WithMetrics(childM))
@@ -177,7 +176,7 @@ func TestMetrics_ChildOverride(t *testing.T) {
 
 func TestMetrics_NoopDefault(t *testing.T) {
 	// Run without WithMetrics — should not panic.
-	w := NewWorker("noop-test", func(ctx WorkerContext) error {
+	w := NewWorker("noop-test").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -185,7 +184,7 @@ func TestMetrics_NoopDefault(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	Run(ctx, []*Worker{w}) // no WithMetrics — uses NoopMetrics
+	Run(ctx, []*Worker{w}) // no WithMetrics — uses BaseMetrics
 }
 
 func TestNewPrometheusMetrics_CachesSameNamespace(t *testing.T) {

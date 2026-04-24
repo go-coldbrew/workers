@@ -2,7 +2,7 @@
 
 ## Package Overview
 
-`go-coldbrew/workers` is a worker lifecycle library built on [thejerf/suture](https://github.com/thejerf/suture). It manages background goroutines with panic recovery, configurable restart, tracing, and structured shutdown.
+`go-coldbrew/workers` is a worker lifecycle library built on [thejerf/suture](https://github.com/thejerf/suture). It manages background goroutines with panic recovery, configurable restart, composable middleware, jitter, and structured shutdown.
 
 ## Build & Test
 
@@ -21,13 +21,13 @@ Every worker runs inside its own suture supervisor subtree:
 ```
 Root Supervisor (created by Run)
 ├── Worker-A supervisor
-│   ├── Worker-A run func
-│   ├── Child-A1 supervisor (added via ctx.Add)
-│   │   └── Child-A1 run func
+│   ├── Worker-A service (middleware chain → handler)
+│   ├── Child-A1 supervisor (added via info.Add)
+│   │   └── Child-A1 service
 │   └── Child-A2 supervisor
-│       └── Child-A2 run func
+│       └── Child-A2 service
 └── Worker-B supervisor
-    └── Worker-B run func
+    └── Worker-B service
 ```
 
 Key properties:
@@ -35,18 +35,33 @@ Key properties:
 - **Independent restart**: each worker restarts independently via suture
 - **Panic recovery**: suture catches panics and converts to errors
 - **Backoff**: configurable exponential backoff with jitter on restart
-- **Tracing**: each worker execution gets an OTEL span via `go-coldbrew/tracing`
+- **Middleware chain**: run-level → worker-level → handler (gRPC interceptor convention)
 
 ## Key Types
 
-- `Worker` — struct with builder pattern (`NewWorker().WithRestart().Every()`)
-- `WorkerContext` — extends `context.Context` with `Name()`, `Attempt()`, `Add()`, `Remove()`, `Children()`
-- `Run(ctx, []*Worker) error` — starts all workers, blocks until ctx cancelled
-- `RunWorker(ctx, *Worker)` — runs a single worker
+- `WorkerInfo` — struct with `GetName()`, `GetAttempt()` getters and child management (`Add`, `Remove`, `GetChildren`)
+- `CycleHandler` — interface: `RunCycle(ctx, *WorkerInfo) error` + `Close() error`
+- `CycleFunc` — function adapter for `CycleHandler` (Close is no-op)
+- `Middleware` — `func(ctx, *WorkerInfo, next CycleFunc) error` (interceptor pattern)
+- `Worker` — builder pattern: `NewWorker(name).HandlerFunc(fn).Every(d).WithJitter(10).Interceptors(mw...)`
+- `Run(ctx, []*Worker, ...RunOption) error` — starts all workers, blocks until ctx cancelled
+- `RunWorker(ctx, *Worker, ...RunOption)` — runs a single worker
+
+## Middleware Sub-Package
+
+`workers/middleware` provides optional built-in interceptors:
+- `Recover(onPanic)` — catch panics per-cycle
+- `Tracing()` — OTEL span per cycle
+- `Duration(observe)` — wall-clock timing
+- `Timeout(d)` — per-cycle deadline
+- `Slog()` — structured log per cycle
+- `LogContext()` — inject worker name/attempt into log context
+- `DistributedLock(locker, opts...)` — distributed lock before each cycle
+- `DefaultInterceptors()` — [Recover, LogContext, Tracing, Slog]
 
 ## Helpers
 
-- `EveryInterval(d, fn)` — periodic ticker loop
+- `EveryInterval(d, fn)` — periodic timer loop
 - `ChannelWorker[T](ch, fn)` — consume from channel
 - `BatchChannelWorker[T](ch, maxSize, maxDelay, fn)` — batch with size/timer flush
 

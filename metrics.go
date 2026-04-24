@@ -23,6 +23,9 @@ type Metrics interface {
 	WorkerPanicked(name string)
 	WorkerFailed(name string, err error)
 	WorkerRestarted(name string, attempt int)
+	// ObserveRunDuration records the attempt lifetime — the duration from
+	// when the worker started to when it stopped or failed. For per-cycle
+	// timing, use middleware.Duration instead.
 	ObserveRunDuration(name string, duration time.Duration)
 	SetActiveWorkers(count int)
 }
@@ -111,7 +114,7 @@ func NewPrometheusMetrics(namespace string) Metrics {
 		runDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Name:      "worker_run_duration_seconds",
-			Help:      "Duration of worker run cycles in seconds.",
+			Help:      "Worker attempt lifetime in seconds (start to stop/failure).",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"worker"}),
 		activeCount: promauto.NewGauge(prometheus.GaugeOpts{

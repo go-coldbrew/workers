@@ -10,8 +10,8 @@ import (
 
 // A simple worker that runs until cancelled.
 func ExampleNewWorker() {
-	w := workers.NewWorker("greeter", func(ctx workers.WorkerContext) error {
-		fmt.Printf("worker %q started (attempt %d)\n", ctx.Name(), ctx.Attempt())
+	w := workers.NewWorker("greeter").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
+		fmt.Printf("worker %q started (attempt %d)\n", info.GetName(), info.GetAttempt())
 		<-ctx.Done()
 		return ctx.Err()
 	})
@@ -27,7 +27,7 @@ func ExampleNewWorker() {
 // The supervisor logs restart events; the worker succeeds on the third attempt.
 func ExampleWorker_WithRestart() {
 	attempt := 0
-	w := workers.NewWorker("resilient", func(ctx workers.WorkerContext) error {
+	w := workers.NewWorker("resilient").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 		attempt++
 		if attempt <= 2 {
 			return fmt.Errorf("transient error")
@@ -48,7 +48,7 @@ func ExampleWorker_WithRestart() {
 // A periodic worker that runs a function on a fixed interval.
 func ExampleWorker_Every() {
 	count := 0
-	w := workers.NewWorker("ticker", func(ctx workers.WorkerContext) error {
+	w := workers.NewWorker("ticker").HandlerFunc(func(_ context.Context, _ *workers.WorkerInfo) error {
 		count++
 		fmt.Printf("tick %d\n", count)
 		return nil
@@ -66,12 +66,12 @@ func ExampleWorker_Every() {
 // Run multiple workers concurrently. All workers start together
 // and stop when the context is cancelled.
 func ExampleRun() {
-	w1 := workers.NewWorker("api-poller", func(ctx workers.WorkerContext) error {
+	w1 := workers.NewWorker("api-poller").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 		fmt.Println("api-poller started")
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	w2 := workers.NewWorker("cache-warmer", func(ctx workers.WorkerContext) error {
+	w2 := workers.NewWorker("cache-warmer").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 		fmt.Println("cache-warmer started")
 		<-ctx.Done()
 		return ctx.Err()
@@ -91,7 +91,7 @@ func ExampleRun() {
 // RunWorker runs a single worker — useful for dynamic managers
 // that spawn child workers in their own goroutines.
 func ExampleRunWorker() {
-	w := workers.NewWorker("single", func(ctx workers.WorkerContext) error {
+	w := workers.NewWorker("single").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 		fmt.Println("running")
 		<-ctx.Done()
 		return ctx.Err()
@@ -107,16 +107,16 @@ func ExampleRunWorker() {
 	// done
 }
 
-// EveryInterval wraps a function in a ticker loop.
+// EveryInterval wraps a function in a timer loop.
 func ExampleEveryInterval() {
 	count := 0
-	fn := workers.EveryInterval(20*time.Millisecond, func(ctx workers.WorkerContext) error {
+	fn := workers.EveryInterval(20*time.Millisecond, func(_ context.Context, _ *workers.WorkerInfo) error {
 		count++
 		fmt.Printf("tick %d\n", count)
 		return nil
 	})
 
-	w := workers.NewWorker("periodic", fn)
+	w := workers.NewWorker("periodic").HandlerFunc(fn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Millisecond)
 	defer cancel()
@@ -135,7 +135,7 @@ func ExampleChannelWorker() {
 	ch <- "!"
 	close(ch)
 
-	fn := workers.ChannelWorker(ch, func(ctx workers.WorkerContext, item string) error {
+	fn := workers.ChannelWorker(ch, func(_ context.Context, _ *workers.WorkerInfo, item string) error {
 		fmt.Println(item)
 		return nil
 	})
@@ -143,7 +143,7 @@ func ExampleChannelWorker() {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	w := workers.NewWorker("consumer", fn)
+	w := workers.NewWorker("consumer").HandlerFunc(fn)
 	workers.Run(ctx, []*workers.Worker{w})
 	// Output:
 	// hello
@@ -160,7 +160,7 @@ func ExampleBatchChannelWorker() {
 	}
 	close(ch)
 
-	fn := workers.BatchChannelWorker(ch, 3, time.Hour, func(ctx workers.WorkerContext, batch []int) error {
+	fn := workers.BatchChannelWorker(ch, 3, time.Hour, func(_ context.Context, _ *workers.WorkerInfo, batch []int) error {
 		fmt.Println(batch)
 		return nil
 	})
@@ -168,7 +168,7 @@ func ExampleBatchChannelWorker() {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
-	w := workers.NewWorker("batcher", fn)
+	w := workers.NewWorker("batcher").HandlerFunc(fn)
 	workers.Run(ctx, []*workers.Worker{w})
 	// Output:
 	// [1 2 3]
@@ -183,7 +183,7 @@ func Example_standalone() {
 	defer cancel()
 
 	workers.Run(ctx, []*workers.Worker{
-		workers.NewWorker("kafka", func(ctx workers.WorkerContext) error {
+		workers.NewWorker("kafka").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 			fmt.Println("consuming messages")
 			<-ctx.Done()
 			return ctx.Err()
@@ -196,29 +196,29 @@ func Example_standalone() {
 }
 
 // A manager worker that dynamically spawns and removes child workers
-// using WorkerContext.Add, Remove, and Children.
-func ExampleWorkerContext_Add() {
-	manager := workers.NewWorker("manager", func(ctx workers.WorkerContext) error {
+// using WorkerInfo.Add, Remove, and GetChildren.
+func ExampleWorkerInfo_Add() {
+	manager := workers.NewWorker("manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
 		// Spawn two child workers dynamically.
-		ctx.Add(workers.NewWorker("child-a", func(ctx workers.WorkerContext) error {
-			fmt.Printf("%s started\n", ctx.Name())
+		info.Add(workers.NewWorker("child-a").HandlerFunc(func(ctx context.Context, childInfo *workers.WorkerInfo) error {
+			fmt.Printf("%s started\n", childInfo.GetName())
 			<-ctx.Done()
 			return ctx.Err()
 		}))
-		ctx.Add(workers.NewWorker("child-b", func(ctx workers.WorkerContext) error {
-			fmt.Printf("%s started\n", ctx.Name())
+		info.Add(workers.NewWorker("child-b").HandlerFunc(func(ctx context.Context, childInfo *workers.WorkerInfo) error {
+			fmt.Printf("%s started\n", childInfo.GetName())
 			<-ctx.Done()
 			return ctx.Err()
 		}))
 
 		// Give children time to start.
 		time.Sleep(30 * time.Millisecond)
-		fmt.Printf("children: %v\n", ctx.Children())
+		fmt.Printf("children: %v\n", info.GetChildren())
 
 		// Remove one child.
-		ctx.Remove("child-a")
+		info.Remove("child-a")
 		time.Sleep(30 * time.Millisecond)
-		fmt.Printf("after remove: %v\n", ctx.Children())
+		fmt.Printf("after remove: %v\n", info.GetChildren())
 
 		<-ctx.Done()
 		return ctx.Err()
@@ -235,19 +235,21 @@ func ExampleWorkerContext_Add() {
 	// after remove: [child-b]
 }
 
-// Replace a child worker by adding one with the same name.
-// The old worker is stopped and the new one takes its place.
-func ExampleWorkerContext_Add_replace() {
-	manager := workers.NewWorker("manager", func(ctx workers.WorkerContext) error {
-		ctx.Add(workers.NewWorker("processor", func(ctx workers.WorkerContext) error {
+// Replace a child worker using Remove + Add.
+// Add is a no-op if the name exists, so Remove first.
+func ExampleWorkerInfo_Add_replace() {
+	manager := workers.NewWorker("manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
+		info.Add(workers.NewWorker("processor").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 			fmt.Println("processor v1")
 			<-ctx.Done()
 			return ctx.Err()
 		}))
 		time.Sleep(30 * time.Millisecond)
 
-		// Replace with a new version — old one is stopped automatically.
-		ctx.Add(workers.NewWorker("processor", func(ctx workers.WorkerContext) error {
+		// Replace: Remove the old worker, then Add the new one.
+		info.Remove("processor")
+		time.Sleep(10 * time.Millisecond) // brief gap while old stops
+		info.Add(workers.NewWorker("processor").HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
 			fmt.Println("processor v2")
 			<-ctx.Done()
 			return ctx.Err()
@@ -269,8 +271,6 @@ func ExampleWorkerContext_Add_replace() {
 
 // Simulates a config-driven worker pool manager that reconciles
 // desired workers against running workers on each tick.
-// This demonstrates the pattern used by services like route-store
-// where worker configs are loaded from a database periodically.
 func Example_dynamicWorkerPool() {
 	// Simulate config that changes over 3 ticks.
 	// Tick 1: start worker-a
@@ -283,7 +283,7 @@ func Example_dynamicWorkerPool() {
 	}
 
 	tick := 0
-	manager := workers.NewWorker("pool-manager", func(ctx workers.WorkerContext) error {
+	manager := workers.NewWorker("pool-manager").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
 		ticker := time.NewTicker(40 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -300,22 +300,28 @@ func Example_dynamicWorkerPool() {
 				}
 				tick++
 
+				running := map[string]bool{}
+				for _, name := range info.GetChildren() {
+					running[name] = true
+				}
+
 				// Remove workers no longer desired.
-				for _, name := range ctx.Children() {
+				for name := range running {
 					if !desired[name] {
-						ctx.Remove(name)
+						info.Remove(name)
 					}
 				}
-				// Add new workers (Add is a no-op replacement if already running).
+				// Add workers that aren't already running.
 				for name := range desired {
-					name := name
-					ctx.Add(workers.NewWorker(name, func(ctx workers.WorkerContext) error {
-						<-ctx.Done()
-						return ctx.Err()
-					}))
+					if !running[name] {
+						info.Add(workers.NewWorker(name).HandlerFunc(func(ctx context.Context, _ *workers.WorkerInfo) error {
+							<-ctx.Done()
+							return ctx.Err()
+						}))
+					}
 				}
 				time.Sleep(10 * time.Millisecond) // let children start
-				fmt.Printf("tick %d: children=%v\n", tick, ctx.Children())
+				fmt.Printf("tick %d: children=%v\n", tick, info.GetChildren())
 			}
 		}
 	})
@@ -330,4 +336,31 @@ func Example_dynamicWorkerPool() {
 	// tick 2: children=[worker-a worker-b]
 	// tick 3: children=[worker-b]
 	// pool shut down
+}
+
+// Per-worker middleware using the interceptor pattern.
+func ExampleWorker_Interceptors() {
+	loggingMW := func(ctx context.Context, info *workers.WorkerInfo, next workers.CycleFunc) error {
+		fmt.Printf("[%s] cycle start\n", info.GetName())
+		err := next(ctx, info)
+		fmt.Printf("[%s] cycle end\n", info.GetName())
+		return err
+	}
+
+	w := workers.NewWorker("with-logging").
+		HandlerFunc(func(_ context.Context, info *workers.WorkerInfo) error {
+			fmt.Printf("[%s] doing work\n", info.GetName())
+			return nil
+		}).
+		Every(20 * time.Millisecond).
+		Interceptors(loggingMW)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{w})
+	// Output:
+	// [with-logging] cycle start
+	// [with-logging] doing work
+	// [with-logging] cycle end
 }
