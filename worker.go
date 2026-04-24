@@ -245,7 +245,7 @@ type Worker struct {
 	failureDecay     float64
 	failureThreshold float64
 	failureBackoff   time.Duration
-	backoffJitter    *suture.Jitter
+	backoffJitter    func(time.Duration) time.Duration
 	timeout          time.Duration
 	metrics          Metrics // nil means inherit from parent
 }
@@ -342,11 +342,17 @@ func (w *Worker) WithFailureBackoff(d time.Duration) *Worker {
 }
 
 // WithBackoffJitter adds random jitter to the backoff duration to prevent
-// thundering herd on coordinated restarts.
-func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker {
-	w.backoffJitter = &jitter
+// thundering herd on coordinated restarts. The function receives the base
+// backoff duration and returns a jittered duration.
+func (w *Worker) WithBackoffJitter(jitter func(time.Duration) time.Duration) *Worker {
+	w.backoffJitter = jitter
 	return w
 }
+
+// jitterFunc adapts a plain function to suture's Jitter interface.
+type jitterFunc func(time.Duration) time.Duration
+
+func (f jitterFunc) Jitter(d time.Duration) time.Duration { return f(d) }
 
 // WithTimeout sets the maximum time to wait for the worker to stop during
 // graceful shutdown. Suture default is 10 seconds.
@@ -376,7 +382,7 @@ func (w *Worker) sutureSpec(hook suture.EventHook) suture.Spec {
 		spec.FailureBackoff = w.failureBackoff
 	}
 	if w.backoffJitter != nil {
-		spec.BackoffJitter = *w.backoffJitter
+		spec.BackoffJitter = jitterFunc(w.backoffJitter)
 	}
 	if w.timeout > 0 {
 		spec.Timeout = w.timeout

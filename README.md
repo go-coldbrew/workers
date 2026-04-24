@@ -251,7 +251,7 @@ shutdown complete
   - [func \(w \*Worker\) Handler\(h CycleHandler\) \*Worker](<#Worker.Handler>)
   - [func \(w \*Worker\) HandlerFunc\(fn CycleFunc\) \*Worker](<#Worker.HandlerFunc>)
   - [func \(w \*Worker\) Interceptors\(mw ...Middleware\) \*Worker](<#Worker.Interceptors>)
-  - [func \(w \*Worker\) WithBackoffJitter\(jitter suture.Jitter\) \*Worker](<#Worker.WithBackoffJitter>)
+  - [func \(w \*Worker\) WithBackoffJitter\(jitter func\(time.Duration\) time.Duration\) \*Worker](<#Worker.WithBackoffJitter>)
   - [func \(w \*Worker\) WithFailureBackoff\(d time.Duration\) \*Worker](<#Worker.WithFailureBackoff>)
   - [func \(w \*Worker\) WithFailureDecay\(decay float64\) \*Worker](<#Worker.WithFailureDecay>)
   - [func \(w \*Worker\) WithFailureThreshold\(threshold float64\) \*Worker](<#Worker.WithFailureThreshold>)
@@ -968,13 +968,13 @@ func main() {
 </details>
 
 <a name="Worker.WithBackoffJitter"></a>
-### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L346>)
+### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L347>)
 
 ```go
-func (w *Worker) WithBackoffJitter(jitter suture.Jitter) *Worker
+func (w *Worker) WithBackoffJitter(jitter func(time.Duration) time.Duration) *Worker
 ```
 
-WithBackoffJitter adds random jitter to the backoff duration to prevent thundering herd on coordinated restarts.
+WithBackoffJitter adds random jitter to the backoff duration to prevent thundering herd on coordinated restarts. The function receives the base backoff duration and returns a jittered duration.
 
 <a name="Worker.WithFailureBackoff"></a>
 ### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L339>)
@@ -1022,7 +1022,7 @@ func (w *Worker) WithJitter(percent int) *Worker
 WithJitter sets per\-worker jitter as a percentage of the base interval. Each tick is randomized within ±percent of the base. Requires [Worker.Every](<#Worker.Every>). Setting WithJitter\(0\) explicitly disables jitter even when a run\-level default is set via [WithDefaultJitter](<#WithDefaultJitter>).
 
 <a name="Worker.WithMetrics"></a>
-### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L360>)
+### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L366>)
 
 ```go
 func (w *Worker) WithMetrics(m Metrics) *Worker
@@ -1080,7 +1080,7 @@ func main() {
 </details>
 
 <a name="Worker.WithTimeout"></a>
-### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L353>)
+### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L359>)
 
 ```go
 func (w *Worker) WithTimeout(d time.Duration) *Worker

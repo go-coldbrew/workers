@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thejerf/suture/v4"
 )
 
 func TestNewWorker(t *testing.T) {
@@ -138,7 +137,7 @@ func TestWorker_WithTimeout(t *testing.T) {
 
 func TestWorker_WithBackoffJitter(t *testing.T) {
 	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
-	w.WithBackoffJitter(suture.NoJitter{})
+	w.WithBackoffJitter(func(d time.Duration) time.Duration { return d / 2 })
 	assert.NotNil(t, w.backoffJitter)
 }
 
