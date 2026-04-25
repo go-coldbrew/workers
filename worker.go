@@ -190,8 +190,9 @@ func NewWorkerInfo(name string, attempt int, opts ...WorkerInfoOption) *WorkerIn
 // all its children stop too.
 //
 // When a child permanently stops, it is automatically removed from
-// the children map on the next call to [WorkerInfo.GetChildren],
-// [WorkerInfo.GetChild], or [WorkerInfo.GetChildCount].
+// the children map on the next call to [WorkerInfo.Add],
+// [WorkerInfo.GetChildren], [WorkerInfo.GetChild], or
+// [WorkerInfo.GetChildCount].
 func (info *WorkerInfo) Add(w *Worker) bool {
 	if info.sup == nil {
 		return false
@@ -199,6 +200,7 @@ func (info *WorkerInfo) Add(w *Worker) bool {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
+	info.pruneStoppedLocked()
 	if _, ok := info.children[w.name]; ok {
 		return false
 	}

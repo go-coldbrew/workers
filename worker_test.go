@@ -312,6 +312,27 @@ func TestWorkerInfo_ZombieChild_ReAdd(t *testing.T) {
 	assert.Equal(t, 1, info.GetChildCount())
 }
 
+func TestWorkerInfo_ZombieChild_ReAdd_NoRead(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// Add a child that stops immediately.
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Re-Add directly — no GetChildren/GetChild/GetChildCount call in between.
+	// Add must prune the stale entry itself.
+	added := info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	assert.True(t, added, "Add should prune stopped child and allow re-Add")
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 1, info.GetChildCount())
+}
+
 func TestWorkerInfo_ZombieChild_GetChild(t *testing.T) {
 	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
 
