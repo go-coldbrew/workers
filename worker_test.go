@@ -89,7 +89,7 @@ func TestWorkerInfo(t *testing.T) {
 
 func TestWorkerInfo_Children_Nil(t *testing.T) {
 	info := &WorkerInfo{name: "test"}
-	assert.Empty(t, info.GetChildren(), "Children on nil map should return empty slice")
+	assert.Empty(t, info.GetChildren(), "Children on nil sup should return empty slice")
 }
 
 func TestCycleFunc_Close(t *testing.T) {
@@ -150,33 +150,6 @@ func TestWorkerInfo_GetHandler(t *testing.T) {
 func TestWorkerInfo_GetHandler_Nil(t *testing.T) {
 	info := NewWorkerInfo("test", 0)
 	assert.Nil(t, info.GetHandler())
-}
-
-func TestWorkerInfo_GetChildCount(t *testing.T) {
-	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
-
-	assert.Equal(t, 0, info.GetChildCount())
-
-	childFn := CycleFunc(func(ctx context.Context, _ *WorkerInfo) error {
-		<-ctx.Done()
-		return ctx.Err()
-	})
-
-	info.Add(NewWorker("a").HandlerFunc(childFn))
-	info.Add(NewWorker("b").HandlerFunc(childFn))
-	time.Sleep(20 * time.Millisecond)
-
-	assert.Equal(t, 2, info.GetChildCount())
-
-	info.Remove("a")
-	time.Sleep(20 * time.Millisecond)
-
-	assert.Equal(t, 1, info.GetChildCount())
-}
-
-func TestWorkerInfo_GetChildCount_Nil(t *testing.T) {
-	info := &WorkerInfo{name: "test"}
-	assert.Equal(t, 0, info.GetChildCount())
 }
 
 func TestWorkerInfo_GetChild(t *testing.T) {
@@ -273,8 +246,8 @@ func TestWorkerInfo_ZombieChild_AutoCleanup(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond) // let child stop
 
-	// Lazy prune should remove the stopped child.
-	assert.Equal(t, 0, info.GetChildCount())
+	// Suture removes the stopped service — GetChildCount reflects this.
+	assert.Equal(t, 0, len(info.GetChildren()))
 	assert.Empty(t, info.GetChildren())
 }
 
@@ -287,7 +260,7 @@ func TestWorkerInfo_ZombieChild_ErrDoNotRestart(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	assert.Equal(t, 0, info.GetChildCount())
+	assert.Equal(t, 0, len(info.GetChildren()))
 	assert.Empty(t, info.GetChildren())
 }
 
@@ -301,15 +274,14 @@ func TestWorkerInfo_ZombieChild_ReAdd(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// After prune, Add with same name should succeed.
-	assert.Equal(t, 0, info.GetChildCount())
+	// Suture removed the stopped child — Add with same name should succeed.
 	added := info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}))
 	assert.True(t, added, "re-Add after zombie prune should succeed")
 	time.Sleep(20 * time.Millisecond)
-	assert.Equal(t, 1, info.GetChildCount())
+	assert.Equal(t, 1, len(info.GetChildren()))
 }
 
 func TestWorkerInfo_ZombieChild_ReAdd_NoRead(t *testing.T) {
@@ -322,15 +294,15 @@ func TestWorkerInfo_ZombieChild_ReAdd_NoRead(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Re-Add directly — no GetChildren/GetChild/GetChildCount call in between.
-	// Add must prune the stale entry itself.
+	// Re-Add directly — suture already removed the stopped service,
+	// so Add sees no conflict via Services().
 	added := info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}))
-	assert.True(t, added, "Add should prune stopped child and allow re-Add")
+	assert.True(t, added, "Add should succeed after stopped child is gone from suture")
 	time.Sleep(20 * time.Millisecond)
-	assert.Equal(t, 1, info.GetChildCount())
+	assert.Equal(t, 1, len(info.GetChildren()))
 }
 
 func TestWorkerInfo_ZombieChild_GetChild(t *testing.T) {
@@ -342,7 +314,7 @@ func TestWorkerInfo_ZombieChild_GetChild(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// GetChild should also prune and return false.
+	// GetChild queries suture — stopped child is not found.
 	_, ok := info.GetChild("child")
 	assert.False(t, ok)
 }

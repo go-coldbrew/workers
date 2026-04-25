@@ -403,7 +403,7 @@ func Example_reconcilerWithChangeDetection() {
 					info.Add(workers.NewWorker(key).Handler(&solverHandler{version: cfg.version}))
 				}
 				time.Sleep(10 * time.Millisecond)
-				fmt.Printf("tick %d: children=%v count=%d\n", tick, info.GetChildren(), info.GetChildCount())
+				fmt.Printf("tick %d: children=%v count=%d\n", tick, info.GetChildren(), len(info.GetChildren()))
 			}
 		}
 	})

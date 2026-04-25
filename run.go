@@ -92,7 +92,6 @@ type workerRunService struct {
 	active   *atomic.Int32
 	cfg      *runConfig
 	attempt  atomic.Int32
-	done     chan struct{} // closed on permanent stop, for lazy zombie detection
 }
 
 // Serve implements suture.Service.
@@ -116,26 +115,14 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	}
 
 	info := &WorkerInfo{
-		name:     ws.w.name,
-		attempt:  attempt,
-		handler:  ws.w.handler,
-		sup:      ws.childSup,
-		children: make(map[string]childEntry),
-		cfg:      ws.cfg,
-		active:   ws.active,
-		metrics:  m,
+		name:    ws.w.name,
+		attempt: attempt,
+		handler: ws.w.handler,
+		sup:     ws.childSup,
+		cfg:     ws.cfg,
+		active:  ws.active,
+		metrics: m,
 	}
-
-	// Remove all children spawned during this attempt so they don't
-	// leak across restarts (each attempt gets a fresh children map,
-	// but children are attached to the long-lived childSup).
-	defer func() {
-		info.childrenMu.Lock()
-		for name := range info.children {
-			info.removeLocked(name)
-		}
-		info.childrenMu.Unlock()
-	}()
 
 	err := ws.runFn(ctx, info)
 
@@ -149,9 +136,6 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 
 	if permanentStop {
 		ws.closeFn()
-		if ws.done != nil {
-			close(ws.done)
-		}
 		return suture.ErrDoNotRestart
 	}
 	return err
@@ -175,9 +159,8 @@ func resolveMetrics(w *Worker, parent Metrics) Metrics {
 
 // addWorkerToSupervisor creates a child supervisor for the worker,
 // builds the middleware chain, resolves jitter, and adds the worker
-// to the parent supervisor. Returns the service token for removal and
-// a channel that is closed when the worker permanently stops.
-func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32, parentMetrics Metrics) (suture.ServiceToken, <-chan struct{}) {
+// to the parent supervisor.
+func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32, parentMetrics Metrics) {
 	m := resolveMetrics(w, parentMetrics)
 
 	handler := w.handler
@@ -218,15 +201,18 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig,
 		})
 	}
 
-	done := make(chan struct{})
 	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
 	childSup.Add(&workerRunService{
 		w: w, runFn: runFn, closeFn: closeFn,
 		childSup: childSup, metrics: m, active: active, cfg: cfg,
-		done: done,
 	})
-	tok := parent.Add(&closingSupervisor{Supervisor: childSup, closeFn: closeFn})
-	return tok, done
+	cs := &closingSupervisor{
+		Supervisor: childSup,
+		closeFn:    closeFn,
+		childName:  w.name,
+		worker:     w,
+	}
+	cs.token = parent.Add(cs)
 }
 
 // Run starts all workers under a suture supervisor and blocks until ctx is
@@ -246,7 +232,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 		EventHook: makeEventHook(cfg.metrics),
 	})
 	for _, w := range workers {
-		_, _ = addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
+		addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
 	}
 	err := root.Serve(ctx)
 	if err != nil && ctx.Err() != nil {
@@ -262,19 +248,46 @@ func RunWorker(ctx context.Context, w *Worker, opts ...RunOption) {
 	_ = Run(ctx, []*Worker{w}, opts...)
 }
 
+// childService is implemented by [closingSupervisor] to expose child
+// metadata when iterating suture's [suture.Supervisor.Services] list.
+type childService interface {
+	getChildName() string
+	getWorker() *Worker
+	getToken() suture.ServiceToken
+	isActive() bool
+}
+
 // closingSupervisor wraps a child supervisor and calls closeFn exactly
 // once after Supervisor.Serve returns. This guarantees handler.Close()
 // fires when the supervisor tree is torn down, even if Serve() panics
 // before reaching the permanentStop check.
+//
+// It also implements [childService] so parent workers can enumerate
+// children via [suture.Supervisor.Services] without maintaining a
+// separate map.
 type closingSupervisor struct {
 	*suture.Supervisor
-	closeFn func()
+	closeFn   func()
+	childName string              // the child worker's name
+	worker    *Worker             // the original Worker config
+	token     suture.ServiceToken // set after parent.Add()
 }
 
 func (cs *closingSupervisor) Serve(ctx context.Context) error {
 	err := cs.Supervisor.Serve(ctx)
 	cs.closeFn()
 	return err
+}
+
+func (cs *closingSupervisor) getChildName() string          { return cs.childName }
+func (cs *closingSupervisor) getWorker() *Worker            { return cs.worker }
+func (cs *closingSupervisor) getToken() suture.ServiceToken { return cs.token }
+
+// isActive returns true if the worker inside this supervisor is still
+// running. When the workerRunService permanently stops (ErrDoNotRestart),
+// suture removes it from the inner supervisor, making Services() empty.
+func (cs *closingSupervisor) isActive() bool {
+	return len(cs.Services()) > 0
 }
 
 // makeEventHook returns a suture event hook that logs events and records
