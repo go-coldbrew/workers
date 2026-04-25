@@ -141,6 +141,44 @@ func TestWorker_WithBackoffJitter(t *testing.T) {
 	assert.NotNil(t, w.backoffJitter)
 }
 
+func TestWorkerInfo_GetHandler(t *testing.T) {
+	fn := CycleFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	info := NewWorkerInfo("test", 0, WithTestHandler(fn))
+	assert.NotNil(t, info.GetHandler())
+}
+
+func TestWorkerInfo_GetHandler_Nil(t *testing.T) {
+	info := NewWorkerInfo("test", 0)
+	assert.Nil(t, info.GetHandler())
+}
+
+func TestWorkerInfo_GetChildCount(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	assert.Equal(t, 0, info.GetChildCount())
+
+	childFn := CycleFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+
+	info.Add(NewWorker("a").HandlerFunc(childFn))
+	info.Add(NewWorker("b").HandlerFunc(childFn))
+	time.Sleep(20 * time.Millisecond)
+
+	assert.Equal(t, 2, info.GetChildCount())
+
+	info.Remove("a")
+	time.Sleep(20 * time.Millisecond)
+
+	assert.Equal(t, 1, info.GetChildCount())
+}
+
+func TestWorkerInfo_GetChildCount_Nil(t *testing.T) {
+	info := &WorkerInfo{name: "test"}
+	assert.Equal(t, 0, info.GetChildCount())
+}
+
 func TestWorkerInfo_GetChild(t *testing.T) {
 	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
 
@@ -225,6 +263,69 @@ func TestNewWorkerInfo_WithTestChildren(t *testing.T) {
 	assert.Equal(t, []string{"b"}, info.GetChildren())
 }
 
+func TestWorkerInfo_ZombieChild_AutoCleanup(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// Add a child that returns nil immediately (no restart).
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond) // let child stop
+
+	// Lazy prune should remove the stopped child.
+	assert.Equal(t, 0, info.GetChildCount())
+	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorkerInfo_ZombieChild_ErrDoNotRestart(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return ErrDoNotRestart
+	}))
+
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, 0, info.GetChildCount())
+	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorkerInfo_ZombieChild_ReAdd(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// Add a child that stops immediately.
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond)
+
+	// After prune, Add with same name should succeed.
+	assert.Equal(t, 0, info.GetChildCount())
+	added := info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	assert.True(t, added, "re-Add after zombie prune should succeed")
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 1, info.GetChildCount())
+}
+
+func TestWorkerInfo_ZombieChild_GetChild(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond)
+
+	// GetChild should also prune and return false.
+	_, ok := info.GetChild("child")
+	assert.False(t, ok)
+}
+
 func TestNewWorkerInfo_Minimal(t *testing.T) {
 	// Without options, Add/Remove/GetChildren are safe no-ops.
 	info := NewWorkerInfo("test", 5)
@@ -235,6 +336,29 @@ func TestNewWorkerInfo_Minimal(t *testing.T) {
 	// Add on nil sup is a no-op.
 	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil }))
 	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorker_ConfigGetters(t *testing.T) {
+	w := NewWorker("test").
+		HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil }).
+		Every(30 * time.Second).
+		WithJitter(15).
+		WithInitialDelay(5 * time.Second).
+		WithRestart(false)
+
+	assert.Equal(t, 30*time.Second, w.GetInterval())
+	assert.Equal(t, 15, w.GetJitterPercent())
+	assert.Equal(t, 5*time.Second, w.GetInitialDelay())
+	assert.False(t, w.GetRestartOnFail())
+}
+
+func TestWorker_ConfigGetters_Defaults(t *testing.T) {
+	w := NewWorker("test")
+
+	assert.Equal(t, time.Duration(0), w.GetInterval())
+	assert.Equal(t, -1, w.GetJitterPercent())
+	assert.Equal(t, time.Duration(0), w.GetInitialDelay())
+	assert.True(t, w.GetRestartOnFail())
 }
 
 func TestWorker_InterceptorsCopiesSlice(t *testing.T) {

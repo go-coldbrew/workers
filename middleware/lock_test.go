@@ -104,6 +104,37 @@ func TestDistributedLock_AcquireError(t *testing.T) {
 	assert.EqualError(t, err, "redis down")
 }
 
+func TestDistributedLock_WithSkipOnNotAcquired(t *testing.T) {
+	locker := &mockLocker{acquired: false}
+	var gotName string
+	mw := DistributedLock(locker, WithSkipOnNotAcquired(func(_ context.Context, name string) {
+		gotName = name
+	}))
+
+	called := false
+	info := workers.NewWorkerInfo("skipped", 0)
+	err := mw(context.Background(), info, func(_ context.Context, _ *workers.WorkerInfo) error {
+		called = true
+		return nil
+	})
+
+	assert.NoError(t, err, "WithSkipOnNotAcquired should return nil")
+	assert.False(t, called, "next should not be called")
+	assert.Equal(t, "skipped", gotName, "logFn should receive worker name")
+}
+
+func TestDistributedLock_WithSkipOnNotAcquired_NilLogFn(t *testing.T) {
+	locker := &mockLocker{acquired: false}
+	mw := DistributedLock(locker, WithSkipOnNotAcquired(nil))
+
+	info := workers.NewWorkerInfo("skipped", 0)
+	err := mw(context.Background(), info, func(_ context.Context, _ *workers.WorkerInfo) error {
+		return nil
+	})
+
+	assert.NoError(t, err, "nil logFn should still skip silently")
+}
+
 func TestDistributedLock_CustomKeyAndTTL(t *testing.T) {
 	locker := &mockLocker{acquired: true}
 	mw := DistributedLock(locker,

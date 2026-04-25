@@ -3,6 +3,7 @@ package workers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync/atomic"
 	"testing"
@@ -134,6 +135,44 @@ func TestEveryInterval_Jitter_VariableIntervals(t *testing.T) {
 	}
 	stddev := math.Sqrt(variance / float64(len(intervals)))
 	assert.Greater(t, stddev, 0.0, "intervals should vary with jitter enabled")
+}
+
+func TestEveryIntervalWithJitter_ErrSkipTick(t *testing.T) {
+	var count atomic.Int32
+	fn := everyIntervalWithJitter(10*time.Millisecond, 0, 0, func(_ context.Context, _ *WorkerInfo) error {
+		n := count.Add(1)
+		if n == 1 {
+			return ErrSkipTick // skip first tick
+		}
+		return nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+
+	info := &WorkerInfo{name: "skiptick", attempt: 0}
+	err := fn(ctx, info)
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "should not exit from ErrSkipTick")
+	assert.GreaterOrEqual(t, int(count.Load()), 2, "should continue ticking after ErrSkipTick")
+}
+
+func TestEveryIntervalWithJitter_ErrSkipTick_Wrapped(t *testing.T) {
+	var count atomic.Int32
+	fn := everyIntervalWithJitter(10*time.Millisecond, 0, 0, func(_ context.Context, _ *WorkerInfo) error {
+		n := count.Add(1)
+		if n == 1 {
+			return fmt.Errorf("db timeout: %w", ErrSkipTick)
+		}
+		return nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+
+	info := &WorkerInfo{name: "skiptick-wrapped", attempt: 0}
+	err := fn(ctx, info)
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "wrapped ErrSkipTick should also be caught")
+	assert.GreaterOrEqual(t, int(count.Load()), 2)
 }
 
 func TestChannelWorker(t *testing.T) {

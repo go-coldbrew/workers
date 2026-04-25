@@ -423,6 +423,40 @@ func TestRun_ClosingSupervisor_ClosesOnShutdown(t *testing.T) {
 	assert.Equal(t, int32(1), closeCount.Load(), "Close should be called exactly once")
 }
 
+func TestRun_ErrSkipTick_PeriodicWorker(t *testing.T) {
+	var count atomic.Int32
+	w := NewWorker("skipper").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		n := count.Add(1)
+		if n == 1 {
+			return ErrSkipTick
+		}
+		return nil
+	}).Every(10 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+
+	err := Run(ctx, []*Worker{w})
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, int(count.Load()), 2, "should tick again after ErrSkipTick")
+}
+
+func TestRun_ErrSkipTick_NotCountedAsFailure(t *testing.T) {
+	m := newMockMetrics()
+	w := NewWorker("skipper").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return ErrSkipTick
+	}).Every(10 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w}, WithMetrics(m))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	assert.Empty(t, m.failed, "ErrSkipTick should not be counted as failure")
+}
+
 func TestRun_ErrDoNotRestart_NotCountedAsFailure(t *testing.T) {
 	m := newMockMetrics()
 	w := NewWorker("completer").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
