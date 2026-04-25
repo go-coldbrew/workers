@@ -139,7 +139,8 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 
 	err := ws.runFn(ctx, info)
 
-	if err != nil && ctx.Err() == nil && !errors.Is(err, suture.ErrDoNotRestart) && !errors.Is(err, ErrSkipTick) {
+	if err != nil && ctx.Err() == nil && !errors.Is(err, suture.ErrDoNotRestart) &&
+		(ws.w.interval <= 0 || !errors.Is(err, ErrSkipTick)) {
 		m.WorkerFailed(ws.w.name, err)
 	}
 

@@ -457,6 +457,24 @@ func TestRun_ErrSkipTick_NotCountedAsFailure(t *testing.T) {
 	assert.Empty(t, m.failed, "ErrSkipTick should not be counted as failure")
 }
 
+func TestRun_ErrSkipTick_NonPeriodic_CountedAsFailure(t *testing.T) {
+	m := newMockMetrics()
+	var attempts atomic.Int32
+	w := NewWorker("non-periodic-skipper").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		attempts.Add(1)
+		return ErrSkipTick // meaningless for non-periodic, should be treated as normal error
+	}).WithRestart(false) // stop after first attempt
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	Run(ctx, []*Worker{w}, WithMetrics(m))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	assert.NotEmpty(t, m.failed, "ErrSkipTick from non-periodic worker should be counted as failure")
+}
+
 func TestRun_ErrDoNotRestart_NotCountedAsFailure(t *testing.T) {
 	m := newMockMetrics()
 	w := NewWorker("completer").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
