@@ -38,6 +38,7 @@ Package middleware provides optional interceptors for [go\\\-coldbrew/workers](<
 - [type LockOption](<#LockOption>)
   - [func WithKeyFunc\(fn func\(name string\) string\) LockOption](<#WithKeyFunc>)
   - [func WithOnNotAcquired\(fn func\(ctx context.Context, name string\) error\) LockOption](<#WithOnNotAcquired>)
+  - [func WithSkipOnNotAcquired\(logFn func\(ctx context.Context, name string\)\) LockOption](<#WithSkipOnNotAcquired>)
   - [func WithTTLFunc\(fn func\(name string\) time.Duration\) LockOption](<#WithTTLFunc>)
 - [type Locker](<#Locker>)
 
@@ -60,7 +61,7 @@ workers.Run(ctx, myWorkers,
 ```
 
 <a name="DistributedLock"></a>
-## func [DistributedLock](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L52>)
+## func [DistributedLock](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L73>)
 
 ```go
 func DistributedLock(locker Locker, opts ...LockOption) workers.Middleware
@@ -114,7 +115,7 @@ func Timeout(d time.Duration) workers.Middleware
 Timeout enforces a per\-cycle deadline. Distinct from \[workers.Worker.WithTimeout\] which controls graceful shutdown.
 
 <a name="Tracing"></a>
-## func [Tracing](<https://github.com/go-coldbrew/workers/blob/main/middleware/tracing.go#L12>)
+## func [Tracing](<https://github.com/go-coldbrew/workers/blob/main/middleware/tracing.go#L24>)
 
 ```go
 func Tracing() workers.Middleware
@@ -122,8 +123,12 @@ func Tracing() workers.Middleware
 
 Tracing creates an OTEL span per cycle via go\-coldbrew/tracing. The span is named "worker:\<name\>:cycle" and records errors.
 
+Worker spans are always sampled regardless of the global TracerProvider's sampler. This prevents silent span drops when using ParentBased\(TraceIDRatioBased\(ratio\)\), where worker root spans \(which have no parent\) would otherwise be probabilistically dropped.
+
+The OTEL trace ID is injected into the log context as "trace" for correlation with the tracing backend.
+
 <a name="LockOption"></a>
-## type [LockOption](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L22>)
+## type [LockOption](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L25>)
 
 LockOption configures [DistributedLock](<#DistributedLock>) behavior.
 
@@ -132,7 +137,7 @@ type LockOption func(*lockConfig)
 ```
 
 <a name="WithKeyFunc"></a>
-### func [WithKeyFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L32>)
+### func [WithKeyFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L35>)
 
 ```go
 func WithKeyFunc(fn func(name string) string) LockOption
@@ -141,7 +146,7 @@ func WithKeyFunc(fn func(name string) string) LockOption
 WithKeyFunc sets a custom function to derive the lock key from the worker name. Default: "worker\-lock:\<name\>".
 
 <a name="WithOnNotAcquired"></a>
-### func [WithOnNotAcquired](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L44>)
+### func [WithOnNotAcquired](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L52>)
 
 ```go
 func WithOnNotAcquired(fn func(ctx context.Context, name string) error) LockOption
@@ -149,8 +154,19 @@ func WithOnNotAcquired(fn func(ctx context.Context, name string) error) LockOpti
 
 WithOnNotAcquired sets a callback invoked when the lock is held by another instance. The cycle is skipped. Default: skip silently \(return nil\).
 
+Caution: returning a non\-nil error from this callback triggers the framework's normal error handling — for periodic workers, this means restart with backoff. If you want to log and skip, return nil from this callback or use [WithSkipOnNotAcquired](<#WithSkipOnNotAcquired>).
+
+<a name="WithSkipOnNotAcquired"></a>
+### func [WithSkipOnNotAcquired](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L60>)
+
+```go
+func WithSkipOnNotAcquired(logFn func(ctx context.Context, name string)) LockOption
+```
+
+WithSkipOnNotAcquired is a convenience [LockOption](<#LockOption>) that calls logFn when the lock is held and skips the cycle \(returns nil, no restart\). If logFn is nil, the cycle is skipped silently \(same as the default but explicit in intent\).
+
 <a name="WithTTLFunc"></a>
-### func [WithTTLFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L38>)
+### func [WithTTLFunc](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L41>)
 
 ```go
 func WithTTLFunc(fn func(name string) time.Duration) LockOption
@@ -159,9 +175,9 @@ func WithTTLFunc(fn func(name string) time.Duration) LockOption
 WithTTLFunc sets a custom function to derive the lock TTL from the worker name. Default: 30s.
 
 <a name="Locker"></a>
-## type [Locker](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L13-L19>)
+## type [Locker](<https://github.com/go-coldbrew/workers/blob/main/middleware/lock.go#L16-L22>)
 
-Locker abstracts a distributed lock backend \(e.g., Redis, etcd, Consul\).
+Locker abstracts a distributed lock backend \(e.g., Redis, etcd, Consul\). If your lock implementation already has Acquire\(ctx, key, ttl\) \(bool, error\) and Release\(ctx, key\) error methods, it satisfies this interface directly — no adapter needed.
 
 ```go
 type Locker interface {

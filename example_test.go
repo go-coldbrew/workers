@@ -8,6 +8,19 @@ import (
 	"github.com/go-coldbrew/workers"
 )
 
+// solverHandler is used in Example_reconcilerWithChangeDetection to
+// demonstrate the handler-as-metadata pattern.
+type solverHandler struct {
+	version int
+}
+
+func (h *solverHandler) RunCycle(ctx context.Context, _ *workers.WorkerInfo) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (h *solverHandler) Close() error { return nil }
+
 // A simple worker that runs until cancelled.
 func ExampleNewWorker() {
 	w := workers.NewWorker("greeter").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
@@ -336,6 +349,73 @@ func Example_dynamicWorkerPool() {
 	// tick 2: children=[worker-a worker-b]
 	// tick 3: children=[worker-b]
 	// pool shut down
+}
+
+// Demonstrates config-driven reconciliation with change detection using
+// the handler-as-metadata pattern. The handler struct carries a config
+// version that the reconciler inspects via GetChild().GetHandler() type
+// assertion, eliminating the need for a parallel tracking map.
+func Example_reconcilerWithChangeDetection() {
+	type solverConfig struct {
+		version int
+	}
+
+	// Simulate config that changes over 3 ticks.
+	configs := []map[string]solverConfig{
+		{"a": {version: 1}},
+		{"a": {version: 1}, "b": {version: 1}},
+		{"a": {version: 2}, "b": {version: 1}}, // a gets new version
+	}
+
+	tick := 0
+	manager := workers.NewWorker("reconciler").HandlerFunc(func(ctx context.Context, info *workers.WorkerInfo) error {
+		ticker := time.NewTicker(40 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+				if tick >= len(configs) {
+					continue
+				}
+				desired := configs[tick]
+				tick++
+
+				// Remove workers no longer desired.
+				for _, name := range info.GetChildren() {
+					if _, ok := desired[name]; !ok {
+						info.Remove(name)
+					}
+				}
+
+				// Add new or replace changed workers.
+				for key, cfg := range desired {
+					child, exists := info.GetChild(key)
+					if exists {
+						// Check if config changed via handler type assertion.
+						if h, ok := child.GetHandler().(*solverHandler); ok && h.version == cfg.version {
+							continue // unchanged, skip
+						}
+						info.Remove(key) // config changed, replace
+						time.Sleep(10 * time.Millisecond) // let old worker stop
+					}
+					info.Add(workers.NewWorker(key).Handler(&solverHandler{version: cfg.version}))
+				}
+				time.Sleep(10 * time.Millisecond)
+				fmt.Printf("tick %d: children=%v count=%d\n", tick, info.GetChildren(), len(info.GetChildren()))
+			}
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	workers.Run(ctx, []*workers.Worker{manager})
+	// Output:
+	// tick 1: children=[a] count=1
+	// tick 2: children=[a b] count=2
+	// tick 3: children=[a b] count=2
 }
 
 // Per-worker middleware using the interceptor pattern.

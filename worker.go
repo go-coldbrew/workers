@@ -33,6 +33,20 @@
 // even with restart enabled. Use [ErrDoNotRestart] for explicit permanent
 // completion from periodic handlers.
 //
+// # Error Semantics for Periodic Handlers
+//
+// The return value from a periodic handler determines what happens next:
+//
+//	| Return value    | Timer loop | Restart? | Use case                 |
+//	|-----------------|------------|----------|--------------------------|
+//	| nil             | continues  | n/a      | Success, next tick fires |
+//	| ErrSkipTick     | continues  | n/a      | Transient failure, skip  |
+//	| ErrDoNotRestart | exits      | no       | Permanent completion     |
+//	| other error     | exits      | yes*     | Failure, needs restart   |
+//	| ctx.Err()       | exits      | no       | Graceful shutdown        |
+//
+// *Only if [Worker.WithRestart](true) (the default).
+//
 // # Middleware
 //
 // Cross-cutting concerns like tracing, logging, and panic recovery are
@@ -49,6 +63,13 @@
 // Attach middleware per-worker via [Worker.Interceptors] or per-run via
 // [WithInterceptors]. Built-in middleware is available in the middleware/
 // sub-package.
+//
+// Run-level interceptors ([WithInterceptors]) wrap all workers and are
+// best for cross-cutting defaults (tracing, logging, panic recovery).
+// Worker-level interceptors ([Worker.Interceptors]) are best for
+// worker-specific concerns (distributed locks with per-worker TTL,
+// rate limiting). Children inherit run-level interceptors but not the
+// parent's worker-level interceptors.
 //
 // # Helpers
 //
@@ -83,6 +104,7 @@ import (
 type WorkerInfo struct {
 	name    string
 	attempt int
+	handler CycleHandler // the worker's handler, set by framework
 
 	// child management, set by framework
 	sup        *suture.Supervisor
@@ -97,6 +119,7 @@ type WorkerInfo struct {
 type childEntry struct {
 	token  suture.ServiceToken
 	worker *Worker
+	done   <-chan struct{} // closed when the child permanently stops
 }
 
 // GetName returns the worker's name as passed to [NewWorker].
@@ -104,6 +127,14 @@ func (info *WorkerInfo) GetName() string { return info.name }
 
 // GetAttempt returns the restart attempt number (0 on first run).
 func (info *WorkerInfo) GetAttempt() int { return info.attempt }
+
+// GetHandler returns the worker's [CycleHandler], or nil if not set.
+// Use type assertion to access handler-specific state or interfaces:
+//
+//	if h, ok := info.GetHandler().(MyHandler); ok {
+//	    // access h.Config, h.Version, etc.
+//	}
+func (info *WorkerInfo) GetHandler() CycleHandler { return info.handler }
 
 // WorkerInfoOption configures a [WorkerInfo] created by [NewWorkerInfo].
 type WorkerInfoOption func(*WorkerInfo)
@@ -125,6 +156,12 @@ func WithTestChildren(ctx context.Context) WorkerInfoOption {
 		info.active = &atomic.Int32{}
 		info.metrics = BaseMetrics{}
 	}
+}
+
+// WithTestHandler sets the handler on a test [WorkerInfo] so that
+// [WorkerInfo.GetHandler] works in unit tests.
+func WithTestHandler(h CycleHandler) WorkerInfoOption {
+	return func(info *WorkerInfo) { info.handler = h }
 }
 
 // NewWorkerInfo creates a [WorkerInfo] with the given name and attempt.
@@ -151,6 +188,11 @@ func NewWorkerInfo(name string, attempt int, opts ...WorkerInfoOption) *WorkerIn
 // Children inherit run-level interceptors, metrics (unless overridden via
 // [Worker.WithMetrics]), and scoped lifecycle — when this worker stops,
 // all its children stop too.
+//
+// When a child permanently stops, it is automatically removed from
+// the children map on the next call to [WorkerInfo.Add],
+// [WorkerInfo.GetChildren], [WorkerInfo.GetChild], or
+// [WorkerInfo.GetChildCount].
 func (info *WorkerInfo) Add(w *Worker) bool {
 	if info.sup == nil {
 		return false
@@ -158,11 +200,12 @@ func (info *WorkerInfo) Add(w *Worker) bool {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
+	info.pruneStoppedLocked()
 	if _, ok := info.children[w.name]; ok {
 		return false
 	}
-	tok := addWorkerToSupervisor(info.sup, w, info.cfg, info.active, info.metrics)
-	info.children[w.name] = childEntry{token: tok, worker: w}
+	tok, done := addWorkerToSupervisor(info.sup, w, info.cfg, info.active, info.metrics)
+	info.children[w.name] = childEntry{token: tok, worker: w, done: done}
 	return true
 }
 
@@ -177,6 +220,22 @@ func (info *WorkerInfo) Remove(name string) {
 	info.removeLocked(name)
 }
 
+// pruneStoppedLocked removes children whose done channel is closed.
+// It also removes the underlying supervisor service to prevent
+// orphaned goroutines. Caller must hold childrenMu.
+func (info *WorkerInfo) pruneStoppedLocked() {
+	for name, entry := range info.children {
+		if entry.done == nil {
+			continue
+		}
+		select {
+		case <-entry.done:
+			info.removeLocked(name)
+		default:
+		}
+	}
+}
+
 // removeLocked stops and deletes a child by name. Caller must hold childrenMu.
 func (info *WorkerInfo) removeLocked(name string) {
 	if entry, ok := info.children[name]; ok {
@@ -186,10 +245,12 @@ func (info *WorkerInfo) removeLocked(name string) {
 }
 
 // GetChildren returns the names of currently running child workers.
+// Stopped children are lazily pruned before building the list.
 func (info *WorkerInfo) GetChildren() []string {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
+	info.pruneStoppedLocked()
 	names := make([]string, 0, len(info.children))
 	for name := range info.children {
 		names = append(names, name)
@@ -198,13 +259,30 @@ func (info *WorkerInfo) GetChildren() []string {
 	return names
 }
 
+// GetChildCount returns the number of currently running child workers.
+// This is more efficient than calling [WorkerInfo.GetChildren] and
+// taking len, as it avoids allocating a sorted slice.
+// Stopped children are lazily pruned.
+func (info *WorkerInfo) GetChildCount() int {
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+	info.pruneStoppedLocked()
+	return len(info.children)
+}
+
 // GetChild returns a copy of a running child worker and true, or the zero
 // value and false if not found. The returned value is a snapshot —
-// mutations have no effect on the running worker.
+// mutations to the Worker fields have no effect on the running worker.
+//
+// The [CycleHandler] (accessible via [Worker.GetHandler]) is shared with
+// the running worker, not copied. Use type assertion to inspect handler
+// state (e.g., config versions for reconciliation). See
+// [Example_reconcilerWithChangeDetection].
 func (info *WorkerInfo) GetChild(name string) (Worker, bool) {
 	info.childrenMu.Lock()
 	defer info.childrenMu.Unlock()
 
+	info.pruneStoppedLocked()
 	if entry, ok := info.children[name]; ok {
 		return *entry.worker, true
 	}
@@ -262,6 +340,21 @@ func (w *Worker) GetName() string { return w.name }
 // GetHandler returns the worker's [CycleHandler], or nil if not set.
 func (w *Worker) GetHandler() CycleHandler { return w.handler }
 
+// GetInterval returns the periodic interval, or 0 if this is not a
+// periodic worker.
+func (w *Worker) GetInterval() time.Duration { return w.interval }
+
+// GetRestartOnFail returns whether the worker restarts on failure.
+func (w *Worker) GetRestartOnFail() bool { return w.restartOnFail }
+
+// GetJitterPercent returns the jitter percentage. -1 means inherit
+// run-level default, 0 means no jitter.
+func (w *Worker) GetJitterPercent() int { return w.jitterPercent }
+
+// GetInitialDelay returns the initial delay before the first tick,
+// or 0 if not set.
+func (w *Worker) GetInitialDelay() time.Duration { return w.initialDelay }
+
 // Handler sets the worker's [CycleHandler]. Use this for handlers that
 // need cleanup via Close (e.g., database connections, leases).
 func (w *Worker) Handler(h CycleHandler) *Worker {
@@ -315,6 +408,10 @@ func (w *Worker) AddInterceptors(mw ...Middleware) *Worker {
 // Default is true. Set to false for one-shot workers that should exit after
 // completion or failure. Note: a handler returning nil always stops the
 // worker permanently, regardless of this setting.
+//
+// Periodic workers (with [Worker.Every]) should generally keep the default
+// (restart enabled). Use [ErrSkipTick] for transient failures and
+// [ErrDoNotRestart] for permanent completion instead of disabling restart.
 func (w *Worker) WithRestart(restart bool) *Worker {
 	w.restartOnFail = restart
 	return w

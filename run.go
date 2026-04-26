@@ -16,12 +16,17 @@ import (
 // permanent completion (e.g., channel closed, work exhausted).
 var ErrDoNotRestart = suture.ErrDoNotRestart
 
+// ErrSkipTick can be returned from a periodic handler to skip the current
+// tick without triggering restart. The timer continues and the next tick
+// fires normally. Only meaningful for periodic workers (with [Worker.Every]).
+var ErrSkipTick = errors.New("workers: skip tick")
+
 // RunOption configures the behavior of [Run].
 type RunOption func(*runConfig)
 
 type runConfig struct {
-	metrics      Metrics
-	interceptors []Middleware
+	metrics       Metrics
+	interceptors  []Middleware
 	defaultJitter int // -1 = not set
 }
 
@@ -81,12 +86,13 @@ func buildChain(middlewares []Middleware, handler CycleHandler) CycleFunc {
 type workerRunService struct {
 	w        *Worker
 	runFn    CycleFunc // fully resolved: chain + interval wrapping
-	closeFn  func() // calls handler.Close() exactly once via shared sync.Once
+	closeFn  func()    // calls handler.Close() exactly once via shared sync.Once
 	childSup *suture.Supervisor
 	metrics  Metrics
 	active   *atomic.Int32
 	cfg      *runConfig
 	attempt  atomic.Int32
+	done     chan struct{} // closed on permanent stop, for lazy zombie detection
 }
 
 // Serve implements suture.Service.
@@ -112,6 +118,7 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 	info := &WorkerInfo{
 		name:     ws.w.name,
 		attempt:  attempt,
+		handler:  ws.w.handler,
 		sup:      ws.childSup,
 		children: make(map[string]childEntry),
 		cfg:      ws.cfg,
@@ -132,7 +139,8 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 
 	err := ws.runFn(ctx, info)
 
-	if err != nil && ctx.Err() == nil && !errors.Is(err, suture.ErrDoNotRestart) {
+	if err != nil && ctx.Err() == nil && !errors.Is(err, suture.ErrDoNotRestart) &&
+		(ws.w.interval <= 0 || !errors.Is(err, ErrSkipTick)) {
 		m.WorkerFailed(ws.w.name, err)
 	}
 
@@ -141,6 +149,9 @@ func (ws *workerRunService) Serve(ctx context.Context) error {
 
 	if permanentStop {
 		ws.closeFn()
+		if ws.done != nil {
+			close(ws.done)
+		}
 		return suture.ErrDoNotRestart
 	}
 	return err
@@ -164,8 +175,9 @@ func resolveMetrics(w *Worker, parent Metrics) Metrics {
 
 // addWorkerToSupervisor creates a child supervisor for the worker,
 // builds the middleware chain, resolves jitter, and adds the worker
-// to the parent supervisor. Returns the service token for removal.
-func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32, parentMetrics Metrics) suture.ServiceToken {
+// to the parent supervisor. Returns the service token for removal and
+// a channel that is closed when the worker permanently stops.
+func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig, active *atomic.Int32, parentMetrics Metrics) (suture.ServiceToken, <-chan struct{}) {
 	m := resolveMetrics(w, parentMetrics)
 
 	handler := w.handler
@@ -206,12 +218,15 @@ func addWorkerToSupervisor(parent *suture.Supervisor, w *Worker, cfg *runConfig,
 		})
 	}
 
+	done := make(chan struct{})
 	childSup := suture.New("worker:"+w.name, w.sutureSpec(makeEventHook(m)))
 	childSup.Add(&workerRunService{
 		w: w, runFn: runFn, closeFn: closeFn,
 		childSup: childSup, metrics: m, active: active, cfg: cfg,
+		done: done,
 	})
-	return parent.Add(&closingSupervisor{Supervisor: childSup, closeFn: closeFn})
+	tok := parent.Add(&closingSupervisor{Supervisor: childSup, closeFn: closeFn})
+	return tok, done
 }
 
 // Run starts all workers under a suture supervisor and blocks until ctx is
@@ -231,7 +246,7 @@ func Run(ctx context.Context, workers []*Worker, opts ...RunOption) error {
 		EventHook: makeEventHook(cfg.metrics),
 	})
 	for _, w := range workers {
-		addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
+		_, _ = addWorkerToSupervisor(root, w, cfg, active, cfg.metrics)
 	}
 	err := root.Serve(ctx)
 	if err != nil && ctx.Err() != nil {

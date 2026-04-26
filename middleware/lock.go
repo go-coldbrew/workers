@@ -10,6 +10,9 @@ import (
 )
 
 // Locker abstracts a distributed lock backend (e.g., Redis, etcd, Consul).
+// If your lock implementation already has Acquire(ctx, key, ttl) (bool, error)
+// and Release(ctx, key) error methods, it satisfies this interface directly —
+// no adapter needed.
 type Locker interface {
 	// Acquire attempts to acquire a lock for the given key with a TTL.
 	// Returns true if the lock was acquired, false if held by another instance.
@@ -41,8 +44,26 @@ func WithTTLFunc(fn func(name string) time.Duration) LockOption {
 
 // WithOnNotAcquired sets a callback invoked when the lock is held by another
 // instance. The cycle is skipped. Default: skip silently (return nil).
+//
+// Caution: returning a non-nil error from this callback triggers the
+// framework's normal error handling — for periodic workers, this means
+// restart with backoff. If you want to log and skip, return nil from
+// this callback or use [WithSkipOnNotAcquired].
 func WithOnNotAcquired(fn func(ctx context.Context, name string) error) LockOption {
 	return func(c *lockConfig) { c.onNotAcquired = fn }
+}
+
+// WithSkipOnNotAcquired is a convenience [LockOption] that calls logFn
+// when the lock is held and skips the cycle (returns nil, no restart).
+// If logFn is nil, the cycle is skipped silently (same as the default
+// but explicit in intent).
+func WithSkipOnNotAcquired(logFn func(ctx context.Context, name string)) LockOption {
+	return WithOnNotAcquired(func(ctx context.Context, name string) error {
+		if logFn != nil {
+			logFn(ctx, name)
+		}
+		return nil
+	})
 }
 
 // DistributedLock acquires a distributed lock before each cycle. If the lock

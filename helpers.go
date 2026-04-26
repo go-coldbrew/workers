@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"errors"
 	"math/rand/v2"
 	"time"
 )
@@ -51,7 +52,9 @@ func everyIntervalWithJitter(base time.Duration, jitterPercent int, initialDelay
 				return ctx.Err()
 			case <-timer.C:
 				if err := fn(ctx, info); err != nil {
-					return err
+					if !errors.Is(err, ErrSkipTick) {
+						return err
+					}
 				}
 				timer.Reset(computeInterval())
 			}

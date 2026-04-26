@@ -89,7 +89,7 @@ func TestWorkerInfo(t *testing.T) {
 
 func TestWorkerInfo_Children_Nil(t *testing.T) {
 	info := &WorkerInfo{name: "test"}
-	assert.Empty(t, info.GetChildren(), "Children on nil map should return empty slice")
+	assert.Empty(t, info.GetChildren(), "Children on nil supervisor should return empty slice")
 }
 
 func TestCycleFunc_Close(t *testing.T) {
@@ -139,6 +139,17 @@ func TestWorker_WithBackoffJitter(t *testing.T) {
 	w := NewWorker("test").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
 	w.WithBackoffJitter(func(d time.Duration) time.Duration { return d / 2 })
 	assert.NotNil(t, w.backoffJitter)
+}
+
+func TestWorkerInfo_GetHandler(t *testing.T) {
+	fn := CycleFunc(func(_ context.Context, _ *WorkerInfo) error { return nil })
+	info := NewWorkerInfo("test", 0, WithTestHandler(fn))
+	assert.NotNil(t, info.GetHandler())
+}
+
+func TestWorkerInfo_GetHandler_Nil(t *testing.T) {
+	info := NewWorkerInfo("test", 0)
+	assert.Nil(t, info.GetHandler())
 }
 
 func TestWorkerInfo_GetChild(t *testing.T) {
@@ -225,6 +236,108 @@ func TestNewWorkerInfo_WithTestChildren(t *testing.T) {
 	assert.Equal(t, []string{"b"}, info.GetChildren())
 }
 
+func TestWorkerInfo_ZombieChild_AutoCleanup(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// Add a child that returns nil immediately (no restart).
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond) // let child stop
+
+	// Done channel is closed on permanent stop — lazy prune removes the child.
+	assert.Equal(t, 0, len(info.GetChildren()))
+	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorkerInfo_ZombieChild_WithGrandchildren(t *testing.T) {
+	// A child that spawns grandchildren and then permanently stops
+	// should not remain visible to the parent.
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, childInfo *WorkerInfo) error {
+		// Spawn a grandchild that stays alive until context is cancelled.
+		childInfo.Add(NewWorker("grandchild").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}))
+		time.Sleep(20 * time.Millisecond) // let grandchild start
+		return ErrDoNotRestart            // child permanently stops
+	}))
+
+	time.Sleep(200 * time.Millisecond)
+
+	assert.Empty(t, info.GetChildren(), "stopped child should not appear even with live grandchildren")
+}
+
+func TestWorkerInfo_ZombieChild_ErrDoNotRestart(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return ErrDoNotRestart
+	}))
+
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, 0, len(info.GetChildren()))
+	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorkerInfo_ZombieChild_ReAdd(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// Add a child that stops immediately.
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Stopped child is pruned — Add with same name should succeed.
+	added := info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	assert.True(t, added, "re-Add after zombie prune should succeed")
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 1, len(info.GetChildren()))
+}
+
+func TestWorkerInfo_ZombieChild_ReAdd_NoRead(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	// Add a child that stops immediately.
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Re-Add directly — Add prunes the stale entry before checking.
+	added := info.Add(NewWorker("child").HandlerFunc(func(ctx context.Context, _ *WorkerInfo) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}))
+	assert.True(t, added, "Add should succeed after stopped child is pruned")
+	time.Sleep(20 * time.Millisecond)
+	assert.Equal(t, 1, len(info.GetChildren()))
+}
+
+func TestWorkerInfo_ZombieChild_GetChild(t *testing.T) {
+	info := NewWorkerInfo("parent", 0, WithTestChildren(t.Context()))
+
+	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error {
+		return nil
+	}).WithRestart(false))
+
+	time.Sleep(100 * time.Millisecond)
+
+	// GetChild prunes stopped child and returns false.
+	_, ok := info.GetChild("child")
+	assert.False(t, ok)
+}
+
 func TestNewWorkerInfo_Minimal(t *testing.T) {
 	// Without options, Add/Remove/GetChildren are safe no-ops.
 	info := NewWorkerInfo("test", 5)
@@ -235,6 +348,29 @@ func TestNewWorkerInfo_Minimal(t *testing.T) {
 	// Add on nil sup is a no-op.
 	info.Add(NewWorker("child").HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil }))
 	assert.Empty(t, info.GetChildren())
+}
+
+func TestWorker_ConfigGetters(t *testing.T) {
+	w := NewWorker("test").
+		HandlerFunc(func(_ context.Context, _ *WorkerInfo) error { return nil }).
+		Every(30 * time.Second).
+		WithJitter(15).
+		WithInitialDelay(5 * time.Second).
+		WithRestart(false)
+
+	assert.Equal(t, 30*time.Second, w.GetInterval())
+	assert.Equal(t, 15, w.GetJitterPercent())
+	assert.Equal(t, 5*time.Second, w.GetInitialDelay())
+	assert.False(t, w.GetRestartOnFail())
+}
+
+func TestWorker_ConfigGetters_Defaults(t *testing.T) {
+	w := NewWorker("test")
+
+	assert.Equal(t, time.Duration(0), w.GetInterval())
+	assert.Equal(t, -1, w.GetJitterPercent())
+	assert.Equal(t, time.Duration(0), w.GetInitialDelay())
+	assert.True(t, w.GetRestartOnFail())
 }
 
 func TestWorker_InterceptorsCopiesSlice(t *testing.T) {
