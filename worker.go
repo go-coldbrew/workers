@@ -107,11 +107,19 @@ type WorkerInfo struct {
 	handler CycleHandler // the worker's handler, set by framework
 
 	// child management, set by framework
-	sup     *suture.Supervisor
-	mu      sync.Mutex // serializes Add/Remove
-	cfg     *runConfig
-	active  *atomic.Int32
-	metrics Metrics
+	sup        *suture.Supervisor
+	childrenMu sync.Mutex
+	children   map[string]childEntry
+	cfg        *runConfig
+	active     *atomic.Int32
+	metrics    Metrics
+}
+
+// childEntry tracks a child worker and its supervisor token.
+type childEntry struct {
+	token  suture.ServiceToken
+	worker *Worker
+	done   <-chan struct{} // closed when the child permanently stops
 }
 
 // GetName returns the worker's name as passed to [NewWorker].
@@ -143,6 +151,7 @@ func WithTestChildren(ctx context.Context) WorkerInfoOption {
 		sup := suture.New("test:"+info.name, suture.Spec{})
 		go sup.Serve(ctx) //nolint:errcheck
 		info.sup = sup
+		info.children = make(map[string]childEntry)
 		info.cfg = &runConfig{metrics: BaseMetrics{}, defaultJitter: -1}
 		info.active = &atomic.Int32{}
 		info.metrics = BaseMetrics{}
@@ -168,21 +177,6 @@ func NewWorkerInfo(name string, attempt int, opts ...WorkerInfoOption) *WorkerIn
 	return info
 }
 
-// findChild returns the [closingSupervisor] for a named child, or nil
-// if not found. It queries suture's [suture.Supervisor.Services] directly —
-// suture is the source of truth for which children are running.
-func (info *WorkerInfo) findChild(name string) (childService, bool) {
-	if info.sup == nil {
-		return nil, false
-	}
-	for _, svc := range info.sup.Services() {
-		if cs, ok := svc.(childService); ok && cs.getChildName() == name && cs.isActive() {
-			return cs, true
-		}
-	}
-	return nil, false
-}
-
 // Add starts a child worker under this worker's supervisor subtree.
 // Returns true if the worker was added, false if a worker with the same
 // name is already running (no-op). To replace a running worker, call
@@ -193,20 +187,25 @@ func (info *WorkerInfo) findChild(name string) (childService, bool) {
 //
 // Children inherit run-level interceptors, metrics (unless overridden via
 // [Worker.WithMetrics]), and scoped lifecycle — when this worker stops,
-// all its children stop too. Stopped children are automatically excluded
-// from [WorkerInfo.GetChildren], [WorkerInfo.GetChild], and
+// all its children stop too.
+//
+// When a child permanently stops, it is automatically removed from
+// the children map on the next call to [WorkerInfo.Add],
+// [WorkerInfo.GetChildren], [WorkerInfo.GetChild], or
 // [WorkerInfo.GetChildCount].
 func (info *WorkerInfo) Add(w *Worker) bool {
 	if info.sup == nil {
 		return false
 	}
-	info.mu.Lock()
-	defer info.mu.Unlock()
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
 
-	if _, exists := info.findChild(w.name); exists {
+	info.pruneStoppedLocked()
+	if _, ok := info.children[w.name]; ok {
 		return false
 	}
-	addWorkerToSupervisor(info.sup, w, info.cfg, info.active, info.metrics)
+	tok, done := addWorkerToSupervisor(info.sup, w, info.cfg, info.active, info.metrics)
+	info.children[w.name] = childEntry{token: tok, worker: w, done: done}
 	return true
 }
 
@@ -215,28 +214,59 @@ func (info *WorkerInfo) Remove(name string) {
 	if info.sup == nil {
 		return
 	}
-	info.mu.Lock()
-	defer info.mu.Unlock()
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
 
-	if cs, ok := info.findChild(name); ok {
-		_ = info.sup.Remove(cs.getToken())
+	info.removeLocked(name)
+}
+
+// pruneStoppedLocked removes children whose done channel is closed.
+// Caller must hold childrenMu.
+func (info *WorkerInfo) pruneStoppedLocked() {
+	for name, entry := range info.children {
+		if entry.done == nil {
+			continue
+		}
+		select {
+		case <-entry.done:
+			delete(info.children, name)
+		default:
+		}
+	}
+}
+
+// removeLocked stops and deletes a child by name. Caller must hold childrenMu.
+func (info *WorkerInfo) removeLocked(name string) {
+	if entry, ok := info.children[name]; ok {
+		_ = info.sup.Remove(entry.token)
+		delete(info.children, name)
 	}
 }
 
 // GetChildren returns the names of currently running child workers.
-// Suture is the source of truth — stopped children are never returned.
+// Stopped children are lazily pruned before building the list.
 func (info *WorkerInfo) GetChildren() []string {
-	if info.sup == nil {
-		return nil
-	}
-	var names []string
-	for _, svc := range info.sup.Services() {
-		if cs, ok := svc.(childService); ok && cs.isActive() {
-			names = append(names, cs.getChildName())
-		}
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+
+	info.pruneStoppedLocked()
+	names := make([]string, 0, len(info.children))
+	for name := range info.children {
+		names = append(names, name)
 	}
 	slices.Sort(names)
 	return names
+}
+
+// GetChildCount returns the number of currently running child workers.
+// This is more efficient than calling [WorkerInfo.GetChildren] and
+// taking len, as it avoids allocating a sorted slice.
+// Stopped children are lazily pruned.
+func (info *WorkerInfo) GetChildCount() int {
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+	info.pruneStoppedLocked()
+	return len(info.children)
 }
 
 // GetChild returns a copy of a running child worker and true, or the zero
@@ -248,8 +278,12 @@ func (info *WorkerInfo) GetChildren() []string {
 // state (e.g., config versions for reconciliation). See
 // [Example_reconcilerWithChangeDetection].
 func (info *WorkerInfo) GetChild(name string) (Worker, bool) {
-	if cs, ok := info.findChild(name); ok {
-		return *cs.getWorker(), true
+	info.childrenMu.Lock()
+	defer info.childrenMu.Unlock()
+
+	info.pruneStoppedLocked()
+	if entry, ok := info.children[name]; ok {
+		return *entry.worker, true
 	}
 	return Worker{}, false
 }
