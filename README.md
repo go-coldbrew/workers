@@ -221,14 +221,13 @@ func (h *solverHandler) Close() error { return nil }
 func main() {
 	type solverConfig struct {
 		version int
-		name    string
 	}
 
 	// Simulate config that changes over 3 ticks.
 	configs := []map[string]solverConfig{
-		{"a": {version: 1, name: "a"}},
-		{"a": {version: 1, name: "a"}, "b": {version: 1, name: "b"}},
-		{"a": {version: 2, name: "a"}, "b": {version: 1, name: "b"}}, // a gets new version
+		{"a": {version: 1}},
+		{"a": {version: 1}, "b": {version: 1}},
+		{"a": {version: 2}, "b": {version: 1}}, // a gets new version
 	}
 
 	tick := 0
@@ -261,7 +260,8 @@ func main() {
 						if h, ok := child.GetHandler().(*solverHandler); ok && h.version == cfg.version {
 							continue // unchanged, skip
 						}
-						info.Remove(key) // config changed, replace
+						info.Remove(key)                  // config changed, replace
+						time.Sleep(10 * time.Millisecond) // let old worker stop
 					}
 					info.Add(workers.NewWorker(key).Handler(&solverHandler{version: cfg.version}))
 				}
