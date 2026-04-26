@@ -408,6 +408,10 @@ func (w *Worker) AddInterceptors(mw ...Middleware) *Worker {
 // Default is true. Set to false for one-shot workers that should exit after
 // completion or failure. Note: a handler returning nil always stops the
 // worker permanently, regardless of this setting.
+//
+// Periodic workers (with [Worker.Every]) should generally keep the default
+// (restart enabled). Use [ErrSkipTick] for transient failures and
+// [ErrDoNotRestart] for permanent completion instead of disabling restart.
 func (w *Worker) WithRestart(restart bool) *Worker {
 	w.restartOnFail = restart
 	return w

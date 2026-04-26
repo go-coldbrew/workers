@@ -1135,7 +1135,7 @@ func main() {
 </details>
 
 <a name="Worker.WithBackoffJitter"></a>
-### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L440>)
+### func \(\*Worker\) [WithBackoffJitter](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L444>)
 
 ```go
 func (w *Worker) WithBackoffJitter(jitter func(time.Duration) time.Duration) *Worker
@@ -1144,7 +1144,7 @@ func (w *Worker) WithBackoffJitter(jitter func(time.Duration) time.Duration) *Wo
 WithBackoffJitter adds random jitter to the backoff duration to prevent thundering herd on coordinated restarts. The function receives the base backoff duration and returns a jittered duration.
 
 <a name="Worker.WithFailureBackoff"></a>
-### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L432>)
+### func \(\*Worker\) [WithFailureBackoff](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L436>)
 
 ```go
 func (w *Worker) WithFailureBackoff(d time.Duration) *Worker
@@ -1153,7 +1153,7 @@ func (w *Worker) WithFailureBackoff(d time.Duration) *Worker
 WithFailureBackoff sets the duration to wait between restarts. Suture default is 15 seconds.
 
 <a name="Worker.WithFailureDecay"></a>
-### func \(\*Worker\) [WithFailureDecay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L418>)
+### func \(\*Worker\) [WithFailureDecay](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L422>)
 
 ```go
 func (w *Worker) WithFailureDecay(decay float64) *Worker
@@ -1162,7 +1162,7 @@ func (w *Worker) WithFailureDecay(decay float64) *Worker
 WithFailureDecay sets the rate at which failure count decays over time. A value of 1.0 means failures decay by one per second. Suture default is 1.0.
 
 <a name="Worker.WithFailureThreshold"></a>
-### func \(\*Worker\) [WithFailureThreshold](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L425>)
+### func \(\*Worker\) [WithFailureThreshold](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L429>)
 
 ```go
 func (w *Worker) WithFailureThreshold(threshold float64) *Worker
@@ -1189,7 +1189,7 @@ func (w *Worker) WithJitter(percent int) *Worker
 WithJitter sets per\-worker jitter as a percentage of the base interval. Each tick is randomized within ±percent of the base. Requires [Worker.Every](<#Worker.Every>). Setting WithJitter\(0\) explicitly disables jitter even when a run\-level default is set via [WithDefaultJitter](<#WithDefaultJitter>).
 
 <a name="Worker.WithMetrics"></a>
-### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L459>)
+### func \(\*Worker\) [WithMetrics](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L463>)
 
 ```go
 func (w *Worker) WithMetrics(m Metrics) *Worker
@@ -1198,13 +1198,15 @@ func (w *Worker) WithMetrics(m Metrics) *Worker
 WithMetrics sets a per\-worker metrics implementation, overriding the metrics inherited from the parent [WorkerInfo](<#WorkerInfo>) or [Run](<#Run>) options.
 
 <a name="Worker.WithRestart"></a>
-### func \(\*Worker\) [WithRestart](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L411>)
+### func \(\*Worker\) [WithRestart](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L415>)
 
 ```go
 func (w *Worker) WithRestart(restart bool) *Worker
 ```
 
 WithRestart configures whether the worker should be restarted on failure. Default is true. Set to false for one\-shot workers that should exit after completion or failure. Note: a handler returning nil always stops the worker permanently, regardless of this setting.
+
+Periodic workers \(with [Worker.Every](<#Worker.Every>)\) should generally keep the default \(restart enabled\). Use [ErrSkipTick](<#ErrSkipTick>) for transient failures and [ErrDoNotRestart](<#ErrDoNotRestart>) for permanent completion instead of disabling restart.
 
 <details><summary>Example</summary>
 <p>
@@ -1247,7 +1249,7 @@ func main() {
 </details>
 
 <a name="Worker.WithTimeout"></a>
-### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L452>)
+### func \(\*Worker\) [WithTimeout](<https://github.com/go-coldbrew/workers/blob/main/worker.go#L456>)
 
 ```go
 func (w *Worker) WithTimeout(d time.Duration) *Worker
