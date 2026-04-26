@@ -221,7 +221,8 @@ func (info *WorkerInfo) Remove(name string) {
 }
 
 // pruneStoppedLocked removes children whose done channel is closed.
-// Caller must hold childrenMu.
+// It also removes the underlying supervisor service to prevent
+// orphaned goroutines. Caller must hold childrenMu.
 func (info *WorkerInfo) pruneStoppedLocked() {
 	for name, entry := range info.children {
 		if entry.done == nil {
@@ -229,7 +230,7 @@ func (info *WorkerInfo) pruneStoppedLocked() {
 		}
 		select {
 		case <-entry.done:
-			delete(info.children, name)
+			info.removeLocked(name)
 		default:
 		}
 	}
