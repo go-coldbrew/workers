@@ -115,13 +115,13 @@ func Timeout(d time.Duration) workers.Middleware
 Timeout enforces a per\-cycle deadline. Distinct from \[workers.Worker.WithTimeout\] which controls graceful shutdown.
 
 <a name="Tracing"></a>
-## func [Tracing](<https://github.com/go-coldbrew/workers/blob/main/middleware/tracing.go#L18>)
+## func [Tracing](<https://github.com/go-coldbrew/workers/blob/main/middleware/tracing.go#L20>)
 
 ```go
 func Tracing() workers.Middleware
 ```
 
-Tracing creates an OTEL root span per cycle via go\-coldbrew/tracing. The span is named "worker:\<name\>:cycle" and records errors. Sampling is determined by the global TracerProvider's sampler.
+Tracing creates an OTEL span per cycle via go\-coldbrew/tracing. The span is named "worker:\<name\>:cycle" and records errors. In typical use the span is a trace root because worker contexts carry no parent span; sampling is determined by the global TracerProvider's sampler.
 
 The OTEL trace ID is injected into the log context as "trace" for correlation with the tracing backend.
 
